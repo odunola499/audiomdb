@@ -10,7 +10,7 @@ import io
 import multiprocessing as mp
 from queue import Queue, Empty
 import threading
-from src.audiomdb.processors import AudioProcessor
+from audiomdb.processors import AudioProcessor
 
 
 def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
@@ -155,6 +155,7 @@ class BaseConverter(ABC):
         buffer = []
         shard_id = 0
 
+        print('working...')
         for idx, (key, sample) in enumerate(self.sample_iterator()):
             buffer.append((key, sample))
 
@@ -176,6 +177,7 @@ class BaseConverter(ABC):
         """
         task_queue = Queue(maxsize = self.num_workers * 2)
 
+        print('working...')
         def producer():
             buffer = []
             shard_id = 0

@@ -1,7 +1,7 @@
 import os
 import json
 from typing import Optional, List
-from src.audiomdb.converters.base import BaseConverter
+from audiomdb.converters.base import BaseConverter
 
 class FileConverter(BaseConverter):
     """

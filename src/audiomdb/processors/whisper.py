@@ -1,5 +1,5 @@
 from transformers import WhisperFeatureExtractor, WhisperTokenizer
-from src.audiomdb.processors import AudioProcessor, TextProcessor
+from audiomdb.processors import AudioProcessor, TextProcessor
 import numpy as np
 
 

@@ -1,4 +1,4 @@
-from src.audiomdb.converters.base import BaseConverter
+from audiomdb.converters.base import BaseConverter
 from datasets import load_dataset, Audio
 from typing import Optional
 

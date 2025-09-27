@@ -1,4 +1,4 @@
-from src.audiomdb.processors import AudioProcessor
+from audiomdb.processors import AudioProcessor
 from audiomentations import Compose, AddGaussianNoise, TimeStretch, PitchShift, Shift
 
 test_augment = Compose([
