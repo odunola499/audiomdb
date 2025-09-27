@@ -11,7 +11,8 @@ import multiprocessing as mp
 from queue import Queue, Empty
 import threading
 from audiomdb.processors import AudioProcessor
-
+from tqdm.auto import tqdm
+import humanize
 
 def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
     """
@@ -103,7 +104,7 @@ class BaseConverter(ABC):
         self.samples_per_shard = samples_per_shard
         self.map_size = map_size
         os.makedirs(output_dir, exist_ok = True)
-        self.num_workers = num_workers
+        self.num_workers = min(num_workers, mp.cpu_count())
         self.processors = processors or {}
 
 
@@ -154,18 +155,43 @@ class BaseConverter(ABC):
         """
         buffer = []
         shard_id = 0
+        total_samples = 0
+        total_duration = 0
+
+        print("Starting conversion...")
+        iterator = self.sample_iterator()
+        pbar = tqdm(iterator, desc = "Converting samples", unit = "sample")
 
         print('working...')
-        for idx, (key, sample) in enumerate(self.sample_iterator()):
+        for idx, (key, sample) in enumerate(pbar):
             buffer.append((key, sample))
+            total_samples += 1
+            if 'duration' in sample:
+                total_duration += sample['duration']
 
             if len(buffer) >= self.samples_per_shard:
-                BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+                shard_path = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+                size = os.path.getsize(shard_path)
+                if total_duration < 3600:
+                    duration_str = f"{total_duration / 60:.1f} min"
+                else:
+                    duration_str = f"{total_duration / 3600:.2f} h"
+
+                pbar.set_postfix_str(f"dur={duration_str}")
+                print(f"[Shard {shard_id:05d}] {len(buffer)} samples, {humanize.naturalsize(size)}")
                 buffer.clear()
                 shard_id += 1
 
         if buffer:
-            BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+            shard_path = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+            size = os.path.getsize(shard_path)
+            if total_duration < 3600:
+                duration_str = f"{total_duration / 60:.1f} min"
+            else:
+                duration_str = f"{total_duration / 3600:.2f} h"
+
+            pbar.set_postfix_str(f"dur={duration_str}")
+            print(f"[Shard {shard_id:05d}] {len(buffer)} samples, {humanize.naturalsize(size)}")
 
         print(f"Conversion complete. {shard_id + 1} shards created in {self.output_dir}.")
 
@@ -176,6 +202,9 @@ class BaseConverter(ABC):
         :return:
         """
         task_queue = Queue(maxsize = self.num_workers * 2)
+        total_samples = 0
+        total_duration = 0.0
+        shard_count = 0
 
         print('working...')
         def producer():
@@ -199,7 +228,7 @@ class BaseConverter(ABC):
         producer_thread = threading.Thread(target = producer)
         producer_thread.start()
 
-        with mp.Pool(self.num_workers) as pool:
+        with mp.Pool(self.num_workers) as pool, tqdm(desc="Writing shards", unit="shard") as pbar:
             tasks = []
 
             while True:
@@ -209,11 +238,25 @@ class BaseConverter(ABC):
                         break
 
                     shard_id, samples = task
+                    total_samples += len(samples)
+                    for _, s in samples:
+                        if "duration" in s:
+                            total_duration += s["duration"]
+
                     tasks.append(
                         pool.apply_async(
                             BaseConverter._write_shard, args = (shard_id, samples, self.output_dir, self.map_size, self.processors)
                         )
                     )
+
+                    shard_count += 1
+                    if total_duration < 3600:
+                        dur_str = f"{total_duration / 60:.1f} min"
+                    else:
+                        dur_str = f"{total_duration / 3600:.2f} h"
+                    pbar.set_postfix_str(f"dur={dur_str}, samples={total_samples}")
+                    pbar.update(1)
+
                 except Empty:
                     continue
 

@@ -25,7 +25,7 @@ class HFConverter(BaseConverter):
                  store_columns:Optional[list] = None,
                  data_name:str = None,
                  data_split:str = "train",
-                 hf_stream:bool = False,
+                 hf_stream:bool = True,
                  sample_rate = 16000,
                  ):
         super().__init__(
