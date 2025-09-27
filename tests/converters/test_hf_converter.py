@@ -1,9 +1,7 @@
 import tempfile
 import shutil
-import numpy as np
-import pytest
 from unittest.mock import patch, MagicMock
-from src.converters.hf_converter import HFConverter
+from src.audiomdb.converters.hf_converter import HFConverter
 
 
 class TestHFConverter:

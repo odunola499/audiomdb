@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 from unittest.mock import Mock, patch
-from src.processors.base import AudioProcessor, TextProcessor
-from src.processors.audiomentations import AudiomentationsProcessor
+from src.audiomdb.processors.base import AudioProcessor, TextProcessor
+from src.audiomdb.processors.audiomentations import AudiomentationsProcessor
 
 
 class MockAudioProcessor(AudioProcessor):
@@ -114,7 +114,7 @@ class TestAudiomentationsProcessor:
 class TestWhisperProcessors:
     def test_whisper_feature_extractor_import(self, mock_tokenizer, mock_extractor):
         try:
-            from src.processors.whisper import AudioMDWhisperFeatureExtractor, TextMDWhisperTokenizer
+            from src.audiomdb.processors.whisper import AudioMDWhisperFeatureExtractor, TextMDWhisperTokenizer
             assert AudioMDWhisperFeatureExtractor is not None
             assert TextMDWhisperTokenizer is not None
         except ImportError:
@@ -122,7 +122,7 @@ class TestWhisperProcessors:
 
     def test_whisper_feature_extractor_process(self, mock_tokenizer, mock_extractor):
         try:
-            from src.processors.whisper import AudioMDWhisperFeatureExtractor
+            from src.audiomdb.processors.whisper import AudioMDWhisperFeatureExtractor
             
             mock_extractor_instance = Mock()
             mock_extractor_instance.return_value.input_features = np.array([[1, 2, 3]])
@@ -138,7 +138,7 @@ class TestWhisperProcessors:
 
     def test_whisper_tokenizer_process(self, mock_tokenizer, mock_extractor):
         try:
-            from src.processors.whisper import TextMDWhisperTokenizer
+            from src.audiomdb.processors.whisper import TextMDWhisperTokenizer
             
             mock_tokenizer_instance = Mock()
             mock_tokens = Mock()

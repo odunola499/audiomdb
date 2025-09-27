@@ -1,5 +1,5 @@
 from transformers import WhisperFeatureExtractor, WhisperTokenizer
-from src.processors import AudioProcessor, TextProcessor
+from src.audiomdb.processors import AudioProcessor, TextProcessor
 import numpy as np
 
 
@@ -83,3 +83,6 @@ class TextMDWhisperTokenizer(TextProcessor):
 
     def eos_token(self):
         return self.tokenizer.eos_token
+
+    def eos_token_id(self):
+        return self.tokenizer.eos_token_id

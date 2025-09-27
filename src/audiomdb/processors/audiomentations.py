@@ -1,6 +1,5 @@
-from src.processors import AudioProcessor
+from src.audiomdb.processors import AudioProcessor
 from audiomentations import Compose, AddGaussianNoise, TimeStretch, PitchShift, Shift
-import numpy as np
 
 test_augment = Compose([
     AddGaussianNoise(min_amplitude=0.001, max_amplitude=0.015, p=0.5),

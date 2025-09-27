@@ -1,8 +1,7 @@
 import os
 import json
 from typing import Optional, List
-from src.converters.base import BaseConverter
-
+from src.audiomdb.converters.base import BaseConverter
 
 class FileConverter(BaseConverter):
     """
@@ -29,14 +28,23 @@ class FileConverter(BaseConverter):
     def __init__(
         self,
         manifest: str,
-        *args,
+        output_dir:str,
+        samples_per_shard:int = 50_000,
+        map_size:int = 1 << 40,
+        num_workers:int = 4,
+        processors:dict = None,
         audio_column: str = "audio_filepath",
-        text_column: str = "text",
+        text_column: Optional[str] = "text",
         store_columns: Optional[List[str]] = None,
         sample_rate: int = 16000,
-        **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            output_dir=output_dir,
+            samples_per_shard = samples_per_shard,
+            map_size = map_size,
+            num_workers = num_workers,
+            processors = processors,
+            )
 
         if not os.path.exists(manifest):
             raise FileNotFoundError(f"Manifest file {manifest} not found.")

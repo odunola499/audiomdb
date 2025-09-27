@@ -1,4 +1,4 @@
-from src.converters.base import BaseConverter
+from src.audiomdb.converters.base import BaseConverter
 from datasets import load_dataset, Audio
 from typing import Optional
 
@@ -15,16 +15,26 @@ class HFConverter(BaseConverter):
         converter.convert()
     """
     def __init__(self, data_id:str,
-                 *args,
+                 output_dir: str,
+                 samples_per_shard: int = 50_000,
+                 map_size: int = 1 << 40,
+                 num_workers: int = 4,
+                 processors: dict = None,
                  audio_column:str = "audio",
-                 text_column:str = "text",
+                 text_column:Optional[str] = "text",
                  store_columns:Optional[list] = None,
                  data_name:str = None,
                  data_split:str = "train",
                  hf_stream:bool = False,
                  sample_rate = 16000,
-                 **kwargs):
-        super().__init__(*args, **kwargs)
+                 ):
+        super().__init__(
+            output_dir=output_dir,
+            samples_per_shard=samples_per_shard,
+            map_size=map_size,
+            num_workers=num_workers,
+            processors=processors,
+        )
         dataset = load_dataset(data_id,
                                     data_name,
                                     split = data_split,

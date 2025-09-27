@@ -10,7 +10,7 @@ import io
 import multiprocessing as mp
 from queue import Queue, Empty
 import threading
-from src.processors import AudioProcessor
+from src.audiomdb.processors import AudioProcessor
 
 
 def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
@@ -26,7 +26,7 @@ def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
         return data
     elif isinstance(data, str):
         array, sr = sf.read(data, dtype="float32", always_2d=True)
-        array = array[0] #TODO: Would remove when stable to support stereo
+        array = array[0] # TODO: Would remove when stable to support stereo
         if sr != sample_rate:
             array = librosa.resample(array.T, orig_sr=sr, target_sr=sample_rate).T
         return array
@@ -40,8 +40,8 @@ def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
 
 def process_sample(sample: dict, processors: dict = None) -> dict:
 
-    audio_bytes = sample.get('audio')
-    if not audio_bytes:
+    audio_bytes = sample.get('audio',None)
+    if audio_bytes is None:
         raise ValueError("Sample does not contain 'audio' data.")
 
     audio_array = load_array(data=audio_bytes, sample_rate=sample.get('sample_rate', 16000))
@@ -52,32 +52,35 @@ def process_sample(sample: dict, processors: dict = None) -> dict:
 
     final_results = sample.copy()
 
-    for processor_type, processor_list in processors.items():
-        if processor_list:
-            for column_name, proc in processor_list:
-                data = sample.get(column_name)
-                if not data:
-                    raise ValueError(f"Sample does not contain '{column_name}' data. Did you include {column_name} in `store_columns`?")
+    if processors:
+        for processor_type, processor_list in processors.items():
+            if processor_list:
+                for column_name, proc in processor_list:
+                    data = sample.get(column_name)
+                    if not data:
+                        raise ValueError(f"Sample does not contain '{column_name}' data. Did you include {column_name} in `store_columns`?")
 
-                if isinstance(proc, AudioProcessor):
-                    result = proc.process(data, sample_rate=sample.get('sample_rate', 16000))
-                else:
-                    result = proc.process(data)
-
-                if proc.keep_original:
-                    final_results.update(result)
-                else:
-                    if column_name == 'audio':
-                        final_results.pop('audio', None)
-                        final_results.pop('shape', None)
-                        final_results.pop('dtype', None)
+                    if isinstance(proc, AudioProcessor):
+                        result = proc.process(data, sample_rate=sample.get('sample_rate', 16000))
                     else:
-                        final_results.pop(column_name, None)
-                    
-                    final_results.update(result)
+                        result = proc.process(data)
+
+                    if proc.keep_original:
+                        final_results.update(result)
+                    else:
+                        if column_name == 'audio':
+                            final_results.pop('audio', None)
+                            final_results.pop('shape', None)
+                            final_results.pop('dtype', None)
+                        else:
+                            final_results.pop(column_name, None)
+
+                        final_results.update(result)
 
     if 'audio' in final_results:
-        final_results['audio'] = audio_array.tobytes()
+        current_audio = final_results['audio']
+        if isinstance(current_audio, np.ndarray):
+            final_results['audio'] = current_audio.tobytes()
 
     del sample
     return final_results
