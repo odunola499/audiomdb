@@ -378,11 +378,14 @@ class BaseConverter(ABC):
                 t.get()
 
         producer_thread.join()
+
+        test_sample = metadata['test_sample']
         if 'audio' in test_sample:
             if isinstance(test_sample['audio'], bytes):
                 dtype = test_sample['dtype']
                 shape = test_sample['shape']
                 test_sample['audio'] = np.frombuffer(test_sample['audio'], dtype=dtype).reshape(shape).tolist()
+            metadata['test_sample'] = test_sample
 
         info = {
             "dataset_name": getattr(self, "dataset_name", "unknown"),
