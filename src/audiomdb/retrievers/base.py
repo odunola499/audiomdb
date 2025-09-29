@@ -1,11 +1,20 @@
 from abc import ABC, abstractmethod
-
+import os
+import json
 
 class BaseRetriever(ABC):
     """
     Abstract base class for all retrievers.
     Retrievers fetch data from various sources like hf, s3 ,gcp , local files, etc
     """
+    def __init__(self, cache_dir:str = None):
+        self.cache_dir = cache_dir
+        metadata_path = os.path.join(cache_dir, 'metadata.json') if cache_dir else None
+        with open(metadata_path, 'r') as fp:
+            metadata = json.load(fp)
+        metadata = json.load(fp)
+        self.metadata = metadata
+
 
     @abstractmethod
     def get_file_into_cache(self, file_id, cache_dir:str = None):
@@ -13,6 +22,13 @@ class BaseRetriever(ABC):
         Download or fetch a file from the data source into a local cache directory.
         If the file is already in the cache, it should not be downloaded again.
         Return the local path to the cached file.
+        """
+        pass
+
+    @abstractmethod
+    def delete_file_from_cache(self, file_id, cache_dir:str = None):
+        """
+        Delete a file from the local cache directory to free space.
         """
         pass
 

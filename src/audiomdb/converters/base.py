@@ -25,6 +25,7 @@ def compute_checksum(file_path:str) -> str:
     :return: checksum
     """
     h =hashlib.new('sha256')
+    file_path = os.path.join(file_path,'data.mdb')
     with open(file_path, 'rb') as fp:
         for chunk in iter(lambda: fp.read(8192), b""):
             h.update(chunk)
