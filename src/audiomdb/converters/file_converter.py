@@ -55,6 +55,9 @@ class FileConverter(BaseConverter):
         self.store_columns = store_columns
         self.sample_rate = sample_rate
 
+        self.dataset_name = manifest
+        self.version = manifest
+
         with open(manifest, "r", encoding="utf-8") as f:
             self.entries = [json.loads(line) for line in f]
 

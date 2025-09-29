@@ -13,6 +13,23 @@ import threading
 from audiomdb.processors import AudioProcessor
 from tqdm.auto import tqdm
 import humanize
+import json
+import hashlib
+from datetime import datetime
+
+
+def compute_checksum(file_path:str) -> str:
+    """
+    Compute checksum of a file using sha256
+    :param file_path:
+    :return: checksum
+    """
+    h =hashlib.new('sha256')
+    with open(file_path, 'rb') as fp:
+        for chunk in iter(lambda: fp.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
 
 def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
     """
@@ -82,6 +99,8 @@ def process_sample(sample: dict, processors: dict = None) -> dict:
         current_audio = final_results['audio']
         if isinstance(current_audio, np.ndarray):
             final_results['audio'] = current_audio.tobytes()
+            final_results['shape'] = current_audio.shape
+            final_results['dtype'] = current_audio.dtype
 
     del sample
     return final_results
@@ -154,24 +173,47 @@ class BaseConverter(ABC):
         :return:
         """
         buffer = []
+        buffer_position = 0
         shard_id = 0
         total_samples = 0
         total_duration = 0
+        max_shard_size = 0
+        test_sample = None
+        shard_infos = []
 
         print("Starting conversion...")
         iterator = self.sample_iterator()
         pbar = tqdm(iterator, desc = "Converting samples", unit = "sample")
 
+        probe_file = os.path.join(self.output_dir, 'metadata.json')
+
         print('working...')
         for idx, (key, sample) in enumerate(pbar):
+            sample['shard_id'] = shard_id
+            sample['shard_position'] = buffer_position
+
+            if test_sample is None:
+                test_sample = sample
+
+            buffer_position += 1
             buffer.append((key, sample))
             total_samples += 1
+
             if 'duration' in sample:
                 total_duration += sample['duration']
 
             if len(buffer) >= self.samples_per_shard:
                 shard_path = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
                 size = os.path.getsize(shard_path)
+                checksum = compute_checksum(shard_path)
+
+                shard_infos.append({
+                    'id': shard_id,
+                    'path': os.path.abspath(shard_path),
+                    'size_bytes': size,
+                    "checksum_sha256": checksum
+                })
+
                 if total_duration < 3600:
                     duration_str = f"{total_duration / 60:.1f} min"
                 else:
@@ -179,12 +221,25 @@ class BaseConverter(ABC):
 
                 pbar.set_postfix_str(f"dur={duration_str}")
                 print(f"[Shard {shard_id:05d}] {len(buffer)} samples, {humanize.naturalsize(size)}")
+
                 buffer.clear()
                 shard_id += 1
+                buffer_position = 0
+                max_shard_size = max(len(buffer), max_shard_size)
 
         if buffer:
             shard_path = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
             size = os.path.getsize(shard_path)
+            checksum = compute_checksum(shard_path)
+
+            shard_infos.append({
+                "id": shard_id,
+                "path": os.path.abspath(shard_path),
+                "size_bytes": size,
+                "checksum_sha256": checksum
+            })
+
+
             if total_duration < 3600:
                 duration_str = f"{total_duration / 60:.1f} min"
             else:
@@ -193,68 +248,121 @@ class BaseConverter(ABC):
             pbar.set_postfix_str(f"dur={duration_str}")
             print(f"[Shard {shard_id:05d}] {len(buffer)} samples, {humanize.naturalsize(size)}")
 
+        info = {
+            "dataset_name": getattr(self, "dataset_name", "unknown"),
+            "version": getattr(self, "dataset_version", "unknown"),
+            'dataset_size': total_samples,
+            'total_duration': total_duration,
+            'num_shards': shard_id,
+            'max_item_in_shard': max_shard_size,
+            'features': test_sample,
+            "processors_applied": [p.__class__.__name__ for plist in self.processors.values() for _, p in plist],
+            "shards": shard_infos
+
+        }
+
+        with open(probe_file, 'w') as fp:
+            json.dump(info, fp, indent = 4)
+
         print(f"Conversion complete. {shard_id + 1} shards created in {self.output_dir}.")
 
     def mp_convert(self) -> None:
-        """
-        Convert the dataset to sharded LMDB format using multiprocessing.
-        This method uses multiple processes to process samples and write them to shards.
-        :return:
-        """
-        task_queue = Queue(maxsize = self.num_workers * 2)
-        total_samples = 0
-        total_duration = 0.0
-        shard_count = 0
+        task_queue = Queue(maxsize=self.num_workers * 2)
+        metadata_lock = threading.Lock()
+        metadata = {
+            "total_samples": 0,
+            "total_duration": 0.0,
+            "shard_count": 0,
+            "max_shard_size": 0,
+            "test_sample": None,
+            "shards": []
+        }
+
+        probe_file = os.path.join(self.output_dir, 'metadata.json')
 
         print('working...')
+
         def producer():
             buffer = []
             shard_id = 0
+            buffer_position = 0
 
             for (key, sample) in self.sample_iterator():
+                sample['shard_id'] = shard_id
+                sample['shard_position'] = buffer_position
+
+                with metadata_lock:
+                    if metadata['test_sample'] is None:
+                        metadata['test_sample'] = sample.copy()
+
+                buffer_position += 1
                 buffer.append((key, sample))
 
                 if len(buffer) >= self.samples_per_shard:
+                    with metadata_lock:
+                        metadata['total_samples'] += len(buffer)
+                        metadata['max_shard_size'] = max(metadata['max_shard_size'], len(buffer))
+                        for _, s in buffer:
+                            if "duration" in s:
+                                metadata['total_duration'] += s["duration"]
+
                     task_queue.put((shard_id, buffer.copy()))
                     buffer.clear()
                     shard_id += 1
+                    buffer_position = 0
 
             if buffer:
+                with metadata_lock:
+                    metadata['total_samples'] += len(buffer)
+                    metadata['max_shard_size'] = max(metadata['max_shard_size'], len(buffer))
+                    for _, s in buffer:
+                        if "duration" in s:
+                            metadata['total_duration'] += s["duration"]
+
                 task_queue.put((shard_id, buffer.copy()))
 
             for _ in range(self.num_workers):
                 task_queue.put(None)
 
-        producer_thread = threading.Thread(target = producer)
+        producer_thread = threading.Thread(target=producer)
         producer_thread.start()
 
         with mp.Pool(self.num_workers) as pool, tqdm(desc="Writing shards", unit="shard") as pbar:
             tasks = []
-
             while True:
                 try:
-                    task = task_queue.get(timeout = 1)
+                    task = task_queue.get(timeout=1)
                     if task is None:
                         break
 
                     shard_id, samples = task
-                    total_samples += len(samples)
-                    for _, s in samples:
-                        if "duration" in s:
-                            total_duration += s["duration"]
+
+                    def callback(shard_path, shard_id=shard_id):
+                        size = os.path.getsize(shard_path)
+                        checksum = compute_checksum(shard_path)
+                        with metadata_lock:
+                            metadata["shards"].append({
+                                "id": shard_id,
+                                "path": os.path.abspath(shard_path),
+                                "size_bytes": size,
+                                "checksum_sha256": checksum
+                            })
 
                     tasks.append(
                         pool.apply_async(
-                            BaseConverter._write_shard, args = (shard_id, samples, self.output_dir, self.map_size, self.processors)
+                            BaseConverter._write_shard,
+                            args=(shard_id, samples, self.output_dir, self.map_size, self.processors),
+                            callback=callback
                         )
                     )
 
-                    shard_count += 1
-                    if total_duration < 3600:
-                        dur_str = f"{total_duration / 60:.1f} min"
-                    else:
-                        dur_str = f"{total_duration / 3600:.2f} h"
-                    pbar.set_postfix_str(f"dur={dur_str}, samples={total_samples}")
+                    with metadata_lock:
+                        metadata['shard_count'] += 1
+                        if metadata['total_duration'] < 3600:
+                            dur_str = f"{metadata['total_duration'] / 60:.1f} min"
+                        else:
+                            dur_str = f"{metadata['total_duration'] / 3600:.2f} h"
+                    pbar.set_postfix_str(f"dur={dur_str}, samples={metadata['total_samples']}")
                     pbar.update(1)
 
                 except Empty:
@@ -264,6 +372,22 @@ class BaseConverter(ABC):
                 t.get()
 
         producer_thread.join()
+
+        info = {
+            "dataset_name": getattr(self, "dataset_name", "unknown"),
+            "version": getattr(self, "dataset_version", "unknown"),
+            "creation_date": datetime.utcnow().isoformat(),
+            "dataset_size": metadata['total_samples'],
+            "total_duration": metadata['total_duration'],
+            "num_shards": metadata['shard_count'],
+            "max_item_in_shard": metadata['max_shard_size'],
+            "features": metadata['test_sample'],
+            "processors_applied": [p.__class__.__name__ for plist in self.processors.values() for _, p in plist],
+            "shards": metadata['shards']
+        }
+
+        with open(probe_file, 'w') as fp:
+            json.dump(info, fp, indent=4)
 
         print('Done')
 
