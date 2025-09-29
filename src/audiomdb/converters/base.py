@@ -75,8 +75,8 @@ def process_sample(sample: dict, processors: dict = None) -> dict:
         for processor_type, processor_list in processors.items():
             if processor_list:
                 for column_name, proc in processor_list:
-                    data = sample.get(column_name)
-                    if not data:
+                    data = sample.get(column_name, None)
+                    if data is None:
                         raise ValueError(f"Sample does not contain '{column_name}' data. Did you include {column_name} in `store_columns`?")
 
                     if isinstance(proc, AudioProcessor):

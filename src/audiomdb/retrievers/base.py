@@ -27,7 +27,7 @@ class BaseRetriever(ABC):
 
 
     @abstractmethod
-    def get_file_into_cache(self, file_id, cache_dir:str = None) -> str:
+    def get_file_into_cache(self, file_id) -> str:
         """
         Download or fetch a file or metadata from the data source into a local cache directory.
         If the file is already in the cache, it should not be downloaded again.
@@ -37,7 +37,7 @@ class BaseRetriever(ABC):
 
 
     @abstractmethod
-    def delete_file_from_cache(self, file_id, cache_dir:str = None):
+    def delete_file_from_cache(self, path):
         """
         Delete a file from the local cache directory to free space.
         """
@@ -63,7 +63,7 @@ class BaseRetriever(ABC):
         else:
             metadata = self.metadata
             metadata['shard_paths'] = self.shard_paths
-        return shard_paths, metadata
+        return metadata
 
 
     def read_shard(self):
