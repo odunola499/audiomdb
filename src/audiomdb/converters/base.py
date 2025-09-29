@@ -249,6 +249,11 @@ class BaseConverter(ABC):
             pbar.set_postfix_str(f"dur={duration_str}")
             print(f"[Shard {shard_id:05d}] {len(buffer)} samples, {humanize.naturalsize(size)}")
 
+        if 'audio' in test_sample:
+            if isinstance(test_sample['audio'], bytes):
+                dtype = test_sample['dtype']
+                shape = test_sample['shape']
+                test_sample['audio'] = np.frombuffer(test_sample['audio'], dtype=dtype).reshape(shape).tolist()
         info = {
             "dataset_name": getattr(self, "dataset_name", "unknown"),
             "version": getattr(self, "dataset_version", "unknown"),
@@ -373,6 +378,11 @@ class BaseConverter(ABC):
                 t.get()
 
         producer_thread.join()
+        if 'audio' in test_sample:
+            if isinstance(test_sample['audio'], bytes):
+                dtype = test_sample['dtype']
+                shape = test_sample['shape']
+                test_sample['audio'] = np.frombuffer(test_sample['audio'], dtype=dtype).reshape(shape).tolist()
 
         info = {
             "dataset_name": getattr(self, "dataset_name", "unknown"),

@@ -33,11 +33,18 @@ class BaseRetriever(ABC):
         pass
 
     @abstractmethod
-    def probe(self):
+    def probe(self, verbose:bool = False):
         """
         Probe the data source to get metadata like number of files, total size, shard files id,etc.
+        If verbose is True, returns also shard_level information
+        Returns a tuple (list_of_file_paths, metadata)
         """
-        pass
+        shard_paths = [shard["path"] for shard in self.metadata["shards"]]
+        if not verbose:
+            metadata = self.metadata.pop("shards", None)
+        else:
+            metadata = self.metadata
+        return shard_paths, metadata
 
     @abstractmethod
     def _get_candidate_files(self, k:int):
