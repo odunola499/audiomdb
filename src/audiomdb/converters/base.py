@@ -251,9 +251,7 @@ class BaseConverter(ABC):
 
         if 'audio' in test_sample:
             if isinstance(test_sample['audio'], bytes):
-                dtype = test_sample['dtype']
-                shape = test_sample['shape']
-                test_sample['audio'] = np.frombuffer(test_sample['audio'], dtype=dtype).reshape(shape).tolist()
+                test_sample['audio'] = 'ndarray in bytes' #todo: figure out a better way to do this
         info = {
             "dataset_name": getattr(self, "dataset_name", "unknown"),
             "version": getattr(self, "dataset_version", "unknown"),
@@ -380,12 +378,8 @@ class BaseConverter(ABC):
         producer_thread.join()
 
         test_sample = metadata['test_sample']
-        if 'audio' in test_sample:
-            if isinstance(test_sample['audio'], bytes):
-                dtype = test_sample['dtype']
-                shape = test_sample['shape']
-                test_sample['audio'] = np.frombuffer(test_sample['audio'], dtype=dtype).reshape(shape).tolist()
-            metadata['test_sample'] = test_sample
+        if 'audio' in test_sample and isinstance(test_sample['audio'], bytes):
+            metadata['test_sample']['audio'] = 'ndarray in bytes'
 
         info = {
             "dataset_name": getattr(self, "dataset_name", "unknown"),
