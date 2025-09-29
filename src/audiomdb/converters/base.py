@@ -155,17 +155,19 @@ class BaseConverter(ABC):
         env = lmdb.open(
             shard_path, map_size = map_size
         )
-
+        shard_duration = 0.0
+        
         try:
             with env.begin(write = True) as txn:
                 for key, sample in samples:
                     sample = process_sample(sample, processors or {})
+                    shard_duration += sample.get('duration', 0.0)
                     txn.put(key.encode("utf-8"), pickle.dumps(sample))
 
             env.sync()
         finally:
             env.close()
-        return shard_path
+        return shard_path, shard_duration
 
     def convert(self) -> None:
         """
@@ -200,11 +202,9 @@ class BaseConverter(ABC):
             buffer.append((key, sample))
             total_samples += 1
 
-            if 'duration' in sample:
-                total_duration += sample['duration']
-
             if len(buffer) >= self.samples_per_shard:
-                shard_path = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+                shard_path, shard_duration = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+                total_duration += shard_duration
                 size = os.path.getsize(shard_path)
                 checksum = compute_checksum(shard_path)
 
@@ -223,13 +223,14 @@ class BaseConverter(ABC):
                 pbar.set_postfix_str(f"dur={duration_str}")
                 print(f"[Shard {shard_id:05d}] {len(buffer)} samples, {humanize.naturalsize(size)}")
 
+                max_shard_size = max(max_shard_size, len(buffer))
                 buffer.clear()
                 shard_id += 1
                 buffer_position = 0
-                max_shard_size = max(len(buffer), max_shard_size)
 
         if buffer:
-            shard_path = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+            shard_path, shard_duration = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+            total_duration += shard_duration
             size = os.path.getsize(shard_path)
             checksum = compute_checksum(shard_path)
 
@@ -247,7 +248,7 @@ class BaseConverter(ABC):
                 duration_str = f"{total_duration / 3600:.2f} h"
 
             pbar.set_postfix_str(f"dur={duration_str}")
-            print(f"[Shard {shard_id:05d}] {len(buffer)} samples, {humanize.naturalsize(size)}")
+            print(f"[Shard {shard_id:05d}] {total_samples - (shard_id * self.samples_per_shard)} samples, {humanize.naturalsize(size)}")
 
         if 'audio' in test_sample:
             if isinstance(test_sample['audio'], bytes):
@@ -306,9 +307,6 @@ class BaseConverter(ABC):
                     with metadata_lock:
                         metadata['total_samples'] += len(buffer)
                         metadata['max_shard_size'] = max(metadata['max_shard_size'], len(buffer))
-                        for _, s in buffer:
-                            if "duration" in s:
-                                metadata['total_duration'] += s["duration"]
 
                     task_queue.put((shard_id, buffer.copy()))
                     buffer.clear()
@@ -319,9 +317,7 @@ class BaseConverter(ABC):
                 with metadata_lock:
                     metadata['total_samples'] += len(buffer)
                     metadata['max_shard_size'] = max(metadata['max_shard_size'], len(buffer))
-                    for _, s in buffer:
-                        if "duration" in s:
-                            metadata['total_duration'] += s["duration"]
+
 
                 task_queue.put((shard_id, buffer.copy()))
 
@@ -356,7 +352,7 @@ class BaseConverter(ABC):
                         pool.apply_async(
                             BaseConverter._write_shard,
                             args=(shard_id, samples, self.output_dir, self.map_size, self.processors),
-                            callback=callback
+                            callback=lambda res, shard_id=shard_id: callback(res[0], shard_id)
                         )
                     )
 
@@ -373,7 +369,9 @@ class BaseConverter(ABC):
                     continue
 
             for t in tasks:
-                t.get()
+                res = t.get()
+                with metadata_lock:
+                    metadata['total_duration'] += res[1]
 
         producer_thread.join()
 

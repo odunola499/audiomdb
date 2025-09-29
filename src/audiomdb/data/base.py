@@ -12,10 +12,10 @@ import lmdb
 import pickle
 
 class StreamingDataset(ABC):
-    def __init__(self, file_dir:str, num_threads = 4, queue_size = 2000):
+    def __init__(self, local_dir:str, num_threads = 4, queue_size = 2000):
         super().__init__()
-        self.file_dir = file_dir
-        manifest_file = os.path.join(self.file_dir, 'metadata.json')
+        self.local_dir = local_dir
+        manifest_file = os.path.join(self.local_dir, 'metadata.json')
         with open(manifest_file, 'r') as fp:
             metadata = json.load(fp)
         self.metadata = metadata
@@ -25,6 +25,13 @@ class StreamingDataset(ABC):
         self._active_threads = threading.Semaphore(0)
 
         self.output_queue = queue.Queue(maxsize = queue_size)
+
+    def prefetch_files(self, n):
+        """
+        Retriever refetches n files into local cache, depends on cache size allocation if set
+        :param n:
+        :return:
+        """
 
     def process_file(self, shard_path:str):
         # If shard path not in local dir then download it

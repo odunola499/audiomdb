@@ -82,5 +82,6 @@ class FileConverter(BaseConverter):
             yield key, sample
 
     @property
+    @property
     def converter_name(self) -> str:
         return "manifest_file"
