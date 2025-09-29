@@ -74,5 +74,6 @@ class HFConverter(BaseConverter):
 
             yield key, sample
 
+    @property
     def converter_name(self) -> str:
         return 'hf'
