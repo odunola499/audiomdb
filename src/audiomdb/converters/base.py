@@ -210,7 +210,7 @@ class BaseConverter(ABC):
 
                 shard_infos.append({
                     'id': shard_id,
-                    'path': os.path.abspath(shard_path),
+                    'path': shard_path,
                     'size_bytes': size,
                     "checksum_sha256": checksum
                 })
@@ -236,7 +236,7 @@ class BaseConverter(ABC):
 
             shard_infos.append({
                 "id": shard_id,
-                "path": os.path.abspath(shard_path),
+                "path": os.path.basename(shard_path),
                 "size_bytes": size,
                 "checksum_sha256": checksum
             })
@@ -343,7 +343,7 @@ class BaseConverter(ABC):
                         with metadata_lock:
                             metadata["shards"].append({
                                 "id": shard_id,
-                                "path": os.path.abspath(shard_path),
+                                "path": os.path.basename(shard_path),
                                 "size_bytes": size,
                                 "checksum_sha256": checksum
                             })
