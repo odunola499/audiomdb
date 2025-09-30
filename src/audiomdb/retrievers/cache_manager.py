@@ -6,7 +6,7 @@ from typing import Optional, Dict, Tuple
 
 
 class CacheManager:
-    def __init__(self, retriever, cache_dir: str, max_cache_bytes: Optional[int] = None, workers: int = 2):
+    def __init__(self, retriever, cache_dir: str, max_cache_bytes: Optional[int] = 50 * 1024^3, workers: int = 2):
         self.retriever = retriever
         self.cache_dir = cache_dir
         self.max_cache_bytes = max_cache_bytes
