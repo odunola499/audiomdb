@@ -23,9 +23,11 @@ class HFConverter(BaseConverter):
                  store_columns:Optional[list] = None,
                  data_name:str = None,
                  data_split:str = "train",
+                 data_files:dict = None,
                  hf_stream:bool = True,
                  sample_rate = 16000,
                  version = 1234,
+                 limit_iteration = -1
 
                  ):
         super().__init__(
@@ -34,11 +36,13 @@ class HFConverter(BaseConverter):
             map_size=map_size,
             num_workers=num_workers,
             processors=processors,
+            limit_iteration=limit_iteration
         )
         dataset = load_dataset(data_id,
                                     data_name,
                                     split = data_split,
-                                    streaming = hf_stream)
+                                    streaming = hf_stream,
+                                    data_files=data_files)
 
         dataset = dataset.cast_column(audio_column, Audio(decode = False))
 
@@ -54,6 +58,10 @@ class HFConverter(BaseConverter):
 
     def sample_iterator(self):
         for idx, item in enumerate(self.dataset):
+            if idx >= self.limit_iteration > 0:
+                print(f"Hit limit_iteration {self.limit_iteration}, stopping.")
+                break
+
             key = f"sample_{idx:08d}"
             audio_bytes = item.get(self.audio_column, '').get('bytes')
             text = item.get(self.text_column, '')
@@ -65,7 +73,6 @@ class HFConverter(BaseConverter):
                 'converter': self.converter_name,
             }
             if self.store_columns:
-                #todo" some store columns can be a data type that has to be sent to bytes
                 for col in self.store_columns:
                     if col in item.keys():
                         sample[col] = item[col]

@@ -1,12 +1,12 @@
 import os
-import json
 from concurrent.futures import ThreadPoolExecutor
 import queue
 import threading
 from audiomdb.retrievers import BaseRetriever
 from typing import Optional
+from torch.utils.data import IterableDataset
 
-class StreamingDataset:
+class StreamingDataset(IterableDataset):
     def __init__(self, retriever:BaseRetriever,local_dir:Optional[str] = None,  num_threads = 4, queue_size = 2000):
         super().__init__()
         local_dir = retriever.cache_dir if local_dir is None else local_dir
