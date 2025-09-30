@@ -128,7 +128,7 @@ def process_sample(sample: dict, processors: dict = None) -> dict:
             final_results['shape'] = current_audio.shape
             final_results['dtype'] = current_audio.dtype
 
-    del sample, current_audio
+    del sample
     gc.collect()
     return final_results
 
