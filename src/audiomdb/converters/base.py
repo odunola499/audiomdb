@@ -198,7 +198,7 @@ class BaseConverter(ABC):
         processors_list = [p.__class__.__name__ for plist in self.processors.values() for _, p in plist]
         processors_str = ", ".join(processors_list) if processors_list else "None"
         map_str = BaseConverter.human_bytes(self.map_size)
-        mode = f"multiprocessing ({self.num_workers} workers)" if self.num_workers > 1 else "single-process"
+        mode = f"multithreading ({self.num_workers} workers)" if self.num_workers > 1 else "single-process"
         if console and Panel and Table and Text:
             table = Table.grid(expand=True)
             table.add_row(Text(f"Dataset: {getattr(self, 'dataset_name', 'unknown')}", style="bold"))
@@ -441,18 +441,23 @@ class BaseConverter(ABC):
                 task_queue.put((shard_id, buffer.copy()))
 
             for _ in range(self.num_workers):
-                task_queue.put(None)
+                task_queue.put(None, timeout=5)
 
         producer_thread = threading.Thread(target=producer)
         producer_thread.start()
 
         with mp.Pool(self.num_workers) as pool, tqdm(desc="Writing shards", unit="shard") as pbar:
             tasks = []
+            sentinel_seen = 0
             while True:
                 try:
                     task = task_queue.get(timeout=1)
                     if task is None:
-                        break
+                        sentinel_seen += 1
+                        if sentinel_seen >= self.num_workers:
+                            break
+                        else:
+                            continue
 
                     shard_id, samples = task
 
