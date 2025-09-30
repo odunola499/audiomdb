@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
+from typing import Union, List
 
 class AudioProcessor(ABC):
     """
@@ -11,13 +12,14 @@ class AudioProcessor(ABC):
         self.keep_original = keep_original
 
     @abstractmethod
-    def process(self, data:np.ndarray, sample_rate) -> dict:
+    def process(self, data:Union[np.ndarray, List[np.ndarray]], sample_rate, batch_size = 64) -> dict:
         """
         Process the input audio data.
         Args:
             data: Input audio data to be processed.
         Returns:
             Processed audio artifacts as a dictionary.
+            :param batch_size:
             :param data:
             :param sample_rate:
         """
@@ -74,7 +76,7 @@ class TextProcessor(ABC):
         self.keep_original = keep_original
 
     @abstractmethod
-    def process(self, text:str) -> dict:
+    def process(self, text:Union[str, List[str]]) -> dict:
         """
         Process the input text data.
         Args:
