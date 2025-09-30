@@ -154,7 +154,7 @@ class BaseConverter(ABC):
             self,
             output_dir: str,
             samples_per_shard: int = 50_000,
-            map_size: int = 10 * 1024 ** 3,
+            map_size: int = 500 * 1024 ** 3,
             num_workers: int = 4,
             processors: dict = None,
             limit_iteration:int = -1
@@ -273,6 +273,7 @@ class BaseConverter(ABC):
                         first_sample = sample
                     shard_duration += sample.get('duration', 0.0)
                     txn.put(key.encode("utf-8"), pickle.dumps(sample))
+
             print(f"Written shard {shard_path}")
             env.sync()
         except Exception as e:
