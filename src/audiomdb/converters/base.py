@@ -1,4 +1,5 @@
 import os
+import gc
 import lmdb
 import pickle
 from abc import ABC, abstractmethod
@@ -55,11 +56,13 @@ def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
         array = array[0]
         if sr != sample_rate:
             array = librosa.resample(array.T, orig_sr=sr, target_sr=sample_rate).T
+        del data
         return array
     elif isinstance(data, bytes):
         array, sr = sf.read(io.BytesIO(data))
         if sr != sample_rate:
             array = librosa.resample(array.T, orig_sr=sr, target_sr=sample_rate).T
+        del data
         return array
     else:
         raise ValueError(f"Unsupported data type for load_array, got {type(data)}")
@@ -90,6 +93,7 @@ def process_sample(sample: dict, processors: dict = None) -> dict:
     sample['duration'] = len(audio_array) / sample.get('sample_rate', 16000)
 
     final_results = sample.copy()
+    del audio_array
 
     if processors:
         for processor_type, processor_list in processors.items():
@@ -124,7 +128,8 @@ def process_sample(sample: dict, processors: dict = None) -> dict:
             final_results['shape'] = current_audio.shape
             final_results['dtype'] = current_audio.dtype
 
-    del sample
+    del sample, current_audio
+    gc.collect()
     return final_results
 
 
@@ -304,7 +309,10 @@ class BaseConverter(ABC):
             sample['shard_position'] = buffer_position
 
             if test_sample is None:
-                test_sample = sample
+                probe = {k: v for k, v in sample.items() if k != 'audio'}
+                probe['audio'] = '<audio:bytes>'
+                test_sample = probe
+
 
             buffer_position += 1
             buffer.append((key, sample))
@@ -335,7 +343,10 @@ class BaseConverter(ABC):
                 print(f"[Shard {shard_id:05d}] {len(buffer)} samples, {humanize.naturalsize(size)}")
 
                 max_shard_size = max(max_shard_size, len(buffer))
-                buffer.clear()
+
+                del buffer
+                gc.collect()
+                buffer = []
                 shard_id += 1
                 buffer_position = 0
 
@@ -347,6 +358,9 @@ class BaseConverter(ABC):
                 test_sample = first_sample
             size = os.path.getsize(shard_path)
             checksum = compute_checksum(shard_path)
+
+            del buffer
+            gc.collect()
 
             shard_infos.append({
                 "id": shard_id,
@@ -364,9 +378,6 @@ class BaseConverter(ABC):
             print(
                 f"[Shard {shard_id:05d}] {total_samples - (shard_id * self.samples_per_shard)} samples, {humanize.naturalsize(size)}")
 
-        if 'audio' in test_sample:
-            if isinstance(test_sample['audio'], bytes):
-                test_sample['audio'] = 'audio in bytes'
         info = {
             "dataset_name": getattr(self, "dataset_name", "unknown"),
             "version": getattr(self, "dataset_version", "unknown"),
@@ -418,7 +429,9 @@ class BaseConverter(ABC):
 
                 with metadata_lock:
                     if metadata['test_sample'] is None:
-                        metadata['test_sample'] = sample.copy()
+                        probe = {k: v for k, v in sample.copy().items() if k != 'audio'}
+                        probe['audio'] = '<audio:bytes>'
+                        metadata['test_sample'] = probe
 
                 buffer_position += 1
                 buffer.append((key, sample))
@@ -429,7 +442,11 @@ class BaseConverter(ABC):
                         metadata['max_shard_size'] = max(metadata['max_shard_size'], len(buffer))
 
                     task_queue.put((shard_id, buffer.copy()))
-                    buffer.clear()
+
+                    del buffer
+                    gc.collect()
+                    buffer = []
+
                     shard_id += 1
                     buffer_position = 0
 

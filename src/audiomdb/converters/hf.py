@@ -75,8 +75,8 @@ class HFConverter(BaseConverter):
             if self.store_columns:
                 for col in self.store_columns:
                     if col in item.keys():
-                        sample[col] = item[col]
-
+                        sample[col] = item.pop(col)
+            del item
             yield key, sample
 
     @property
