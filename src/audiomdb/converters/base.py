@@ -275,6 +275,8 @@ class BaseConverter(ABC):
                     txn.put(key.encode("utf-8"), pickle.dumps(sample))
             print(f"Written shard {shard_path}")
             env.sync()
+        except Exception as e:
+            print(e)
         finally:
             env.close()
             print(f"Closed {shard_path}")
