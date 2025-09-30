@@ -11,6 +11,14 @@ except Exception:
 
 class GCPDataRetriever(BaseRetriever):
     def __init__(self, bucket: str, prefix: str = "", cache_dir: str = "cache_dir", prefetch: int = None):
+        """Retrieve shards from Google Cloud Storage on demand and cache locally.
+
+        Args:
+            bucket: Source GCS bucket name.
+            prefix: Optional object prefix where metadata.json and shard_* live.
+            cache_dir: Local cache directory to store downloaded shard dirs.
+            prefetch: If set, prefetch the first N shards. -1 for all.
+        """
         if storage is None:
             raise RuntimeError("google-cloud-storage is required for GCP retrieval")
         self.bucket_name = bucket

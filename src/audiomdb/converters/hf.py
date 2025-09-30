@@ -6,13 +6,11 @@ from typing import Optional
 class HFConverter(BaseConverter):
     """
     Convert a Hugging Face dataset to sharded LMDB format.
-    Example:
-        converter = HFConverter(
-            dataset = load_dataset("mozilla-foundation/common_voice_11_0", "en", split="train"),
-            output_dir = "./lmdb_common_voice_en_train",
-            samples_per_shard = 10000
-        )
-        converter.convert()
+
+    Uses datasets.load_dataset with optional streaming to iterate examples.
+    The audio column is cast to Audio(decode=False) so bytes are fetched lazily
+    and decoding happens only during writing. Additional store_columns can be
+    included in each sample.
     """
     def __init__(self, data_id:str,
                  output_dir: str,

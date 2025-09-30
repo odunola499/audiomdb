@@ -4,10 +4,12 @@ from concurrent.futures import ThreadPoolExecutor
 import queue
 import threading
 from audiomdb.retrievers import BaseRetriever
+from typing import Optional
 
 class StreamingDataset:
-    def __init__(self, local_dir:str, retriever:BaseRetriever, num_threads = 4, queue_size = 2000):
+    def __init__(self, retriever:BaseRetriever,local_dir:Optional[str] = None,  num_threads = 4, queue_size = 2000):
         super().__init__()
+        local_dir = retriever.cache_dir if local_dir is None else local_dir
         self.local_dir = local_dir
 
         self.metadata = retriever.metadata
@@ -27,6 +29,9 @@ class StreamingDataset:
             for fid in self.retriever.file_ids[: max(2 * num_threads, 4)]:
                 self.retriever.manager.request(fid)
         self.begin(self.retriever.file_ids)
+
+    def __len__(self):
+        return self.retriever.dataset_size
 
     def process_file(self, file_id:str):
         with self._file_semaphore:

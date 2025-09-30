@@ -5,9 +5,7 @@ import shutil
 
 
 class HFDataRetriever(BaseRetriever):
-    """
-    Retriever for datasets hosted on Hugging Face Hub.
-    """
+    """Retrieve shards from Hugging Face Hub on demand and cache locally."""
     def __init__(self,
                  repo_id:str,
                  allow_patterns = 'shard_*',

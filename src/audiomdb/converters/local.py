@@ -5,24 +5,15 @@ from audiomdb.converters.base import BaseConverter
 
 class FileConverter(BaseConverter):
     """
-    Convert an audio dataset described by a manifest file into sharded LMDB format.
+    Convert an audio dataset described by a JSONL manifest into sharded LMDB.
 
-    The manifest file should be a JSONL (one JSON object per line) with fields:
-        {
-            "audio_filepath": "/path/to/audio.wav",
-            "text": "transcription text",
-            "duration": 3.45,        # optional
-            "speaker": "spk123"      # optional
-        }
+    Each line in the manifest is a JSON object, typically including:
+    - audio_filepath: path to an audio file
+    - text: optional transcription
+    - duration, speaker, etc.: optional metadata
 
-    Example:
-        converter = FileConverter(
-            manifest="data/train_manifest.json",
-            output_dir="./lmdb_train",
-            samples_per_shard=10000,
-            sample_rate=16000
-        )
-        converter.convert()
+    The converter loads file paths, defers decoding to the writer, applies any
+    configured processors, and writes shards and a metadata.json.
     """
 
     def __init__(

@@ -6,7 +6,25 @@ from typing import Optional, Dict, Tuple
 
 
 class CacheManager:
-    def __init__(self, retriever, cache_dir: str, max_cache_bytes: Optional[int] = 50 * 1024^3, workers: int = 2):
+    """
+    Background downloader and cache size controller for shard directories.
+
+    Ensures requested shard directories are present in cache_dir, tracks their
+    sizes and recent usage, and evicts least-recently-used shards when the
+    configured cache size limit is exceeded.
+    """
+    def __init__(self, retriever, cache_dir: str, max_cache_bytes: Optional[int] = None, workers: int = 2):
+        """
+        Initialize the cache manager.
+
+        Args:
+            retriever: Retriever instance providing get_file_into_cache and delete_file_from_cache.
+            cache_dir: Local directory where shard directories are cached.
+            max_cache_bytes: Maximum total size of all cached shard directories, in bytes.
+                If None, no eviction is performed. When set, the manager evicts least-
+                recently-used shards to keep total size at or below this limit.
+            workers: Number of background downloader threads.
+        """
         self.retriever = retriever
         self.cache_dir = cache_dir
         self.max_cache_bytes = max_cache_bytes

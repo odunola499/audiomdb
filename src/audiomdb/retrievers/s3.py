@@ -10,6 +10,14 @@ except Exception:
 
 class S3DataRetriever(BaseRetriever):
     def __init__(self, bucket: str, prefix: str = "", cache_dir: str = "cache_dir", prefetch: int = None):
+        """Retrieve shards from S3 on demand and cache locally.
+
+        Args:
+            bucket: Source S3 bucket name.
+            prefix: Optional key prefix where metadata.json and shard_* live.
+            cache_dir: Local cache directory to store downloaded shard dirs.
+            prefetch: If set, prefetch the first N shards. -1 for all.
+        """
         if boto3 is None:
             raise RuntimeError("boto3 is required for S3 retrieval")
         self.bucket = bucket

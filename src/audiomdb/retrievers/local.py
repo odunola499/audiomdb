@@ -5,6 +5,15 @@ from audiomdb.retrievers.base import BaseRetriever
 
 class LocalDataRetriever(BaseRetriever):
     def __init__(self, data_dir: str, cache_dir: str = None, prefetch: int = None, background: bool = False, max_cache_bytes: int = None):
+        """Use an existing local dataset directory without remote download.
+
+        Args:
+            data_dir: Directory that contains metadata.json and shard_* directories.
+            cache_dir: Optional separate cache directory. If None, uses data_dir.
+            prefetch: If set, stage the first N shards in cache. -1 for all.
+            background: Enable background cache manager (useful if cache_dir differs).
+            max_cache_bytes: Optional cache size cap when background=True.
+        """
         self.data_dir = os.path.abspath(data_dir)
         if cache_dir is None:
             cache_dir = self.data_dir

@@ -22,7 +22,8 @@ dependencies = [
     "pytest",
     "huggingface-hub",
   "boto3",
-  "google-cloud-storage"
+  "google-cloud-storage",
+  "rich"
 ]
 
 [project.optional-dependencies]

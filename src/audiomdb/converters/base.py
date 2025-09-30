@@ -12,6 +12,16 @@ from queue import Queue, Empty
 import threading
 from audiomdb.processors import AudioProcessor
 from tqdm.auto import tqdm
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+except Exception:
+    Console = None
+    Panel = None
+    Table = None
+    Text = None
 import humanize
 import json
 import hashlib
@@ -33,13 +43,14 @@ def compute_checksum(file_path:str) -> str:
 
 
 def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
-    """
-    Convert input data to a numpy array.
+    """Convert input data to a numpy array at the target sample rate.
+
     Args:
-        data: Input data, can be a file path, numpy array, or bytes.
-        sample_rate: Desired sample rate for audio data.
+        data: File path, numpy array, or raw bytes.
+        sample_rate: Desired sample rate for the returned array.
+
     Returns:
-        Numpy array representation of the input data.
+        A float32 numpy array (mono).
     """
     if isinstance(data, np.ndarray):
         return data
@@ -58,7 +69,19 @@ def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
         raise ValueError(f"Unsupported data type for load_array, got {type(data)}")
 
 def process_sample(sample: dict, processors: dict = None) -> dict:
+    """Decode, process, and serialize a sample ready for LMDB.
 
+    Decodes audio into a float32 numpy array, annotates shape/dtype/duration,
+    applies configured processors, and converts any remaining audio ndarray to
+    bytes for storage.
+
+    Args:
+        sample: The input sample dict with at least 'audio' and 'sample_rate'.
+        processors: A mapping from column name to list of (column_name, processor).
+
+    Returns:
+        A dictionary ready to be serialized into LMDB.
+    """
     audio_bytes = sample.get('audio',None)
     if audio_bytes is None:
         raise ValueError("Sample does not contain 'audio' data.")
@@ -109,9 +132,18 @@ def process_sample(sample: dict, processors: dict = None) -> dict:
 
 class BaseConverter(ABC):
     """
-        Base class for converting datasets into sharded LMDB format.
-        Subclasses should implement `sample_iterator`, which yields (key, value) pairs.
-        """
+    Convert datasets into sharded LMDB format.
+
+    Subclasses implement sample_iterator() to yield (key, sample) pairs. This base
+    handles buffering into shards, optional multiprocessing, applying processors,
+    and writing LMDB environments plus a metadata.json summary.
+
+    Memory considerations:
+    - samples_per_shard controls how many samples are buffered in memory at once.
+    - If raw audio bytes will be stored (no audio processors with keep_original=False),
+      the constructor caps samples_per_shard at 1000 to limit peak memory.
+    - map_size sets the LMDB map size per shard (bytes).
+    """
     def __init__(
             self,
             output_dir:str,
@@ -151,6 +183,58 @@ class BaseConverter(ABC):
 
 
     @staticmethod
+        console = Console() if Console else None
+        def human_bytes(n):
+            try:
+                return humanize.naturalsize(n)
+            except Exception:
+                return f"{n} bytes"
+        def print_header():
+            processors_list = [p.__class__.__name__ for plist in self.processors.values() for _, p in plist]
+            processors_str = ", ".join(processors_list) if processors_list else "None"
+            map_str = human_bytes(self.map_size)
+            mode = f"multiprocessing ({self.num_workers} workers)" if self.num_workers > 1 else "single-process"
+            if console and Panel and Table and Text:
+                table = Table.grid(expand=True)
+                table.add_row(Text(f"Dataset: {getattr(self, 'dataset_name', 'unknown')}", style="bold"))
+                table.add_row(f"Output: {os.path.abspath(self.output_dir)}")
+                table.add_row(f"Mode: {mode}")
+                table.add_row(f"Sharding: {self.samples_per_shard} samples/shard, map_size={map_str}")
+                table.add_row(f"Processors: {processors_str}")
+                console.print(Panel(table, title="AudioMDB Conversion", expand=True))
+            else:
+                print(f"Dataset: {getattr(self, 'dataset_name', 'unknown')}")
+                print(f"Output: {os.path.abspath(self.output_dir)}")
+                print(f"Mode: {mode}")
+                print(f"Sharding: {self.samples_per_shard} samples/shard, map_size={map_str}")
+                print(f"Processors: {processors_str}")
+        def print_summary(total_samples, total_duration, shard_count, max_shard_size, elapsed):
+            dur_str = f"{total_duration/60:.1f} min" if total_duration < 3600 else f"{total_duration/3600:.2f} h"
+            if console and Table and Panel:
+                table = Table(title="Summary", box=None)
+                table.add_column("Metric", style="bold")
+                table.add_column("Value")
+                table.add_row("Total samples", str(total_samples))
+                table.add_row("Total duration", dur_str)
+                table.add_row("Shards", str(shard_count))
+                table.add_row("Max per shard", str(max_shard_size))
+                table.add_row("Output dir", os.path.abspath(self.output_dir))
+                table.add_row("Metadata", os.path.join(os.path.abspath(self.output_dir), 'metadata.json'))
+                table.add_row("Elapsed", f"{elapsed:.2f} s")
+                console.print(Panel(table, title="AudioMDB Conversion Complete", expand=True))
+            else:
+                print("Conversion complete")
+                print(f"Total samples: {total_samples}")
+                print(f"Total duration: {dur_str}")
+                print(f"Shards: {shard_count}")
+                print(f"Max per shard: {max_shard_size}")
+                print(f"Output dir: {os.path.abspath(self.output_dir)}")
+                print(f"Metadata: {os.path.join(os.path.abspath(self.output_dir), 'metadata.json')}")
+                print(f"Elapsed: {elapsed:.2f} s")
+        print_header()
+        import time as _t
+        _start = _t.time()
+
     def _write_shard(shard_id:int, samples:list, output_dir, map_size, processors:dict = None) -> tuple:
         """
         Write a shard to LMDB.
@@ -287,7 +371,8 @@ class BaseConverter(ABC):
         with open(probe_file, 'w') as fp:
             json.dump(info, fp, indent = 4)
 
-        print(f"Conversion complete. {shard_id + 1} shards created in {self.output_dir}.")
+        _elapsed = _t.time() - _start
+        print_summary(total_samples, total_duration, shard_id + 1, max_shard_size, _elapsed)
 
     def mp_convert(self) -> None:
         task_queue = Queue(maxsize=self.num_workers * 2)
@@ -319,6 +404,9 @@ class BaseConverter(ABC):
                         metadata['test_sample'] = sample.copy()
 
                 buffer_position += 1
+        _elapsed = _t.time() - _start
+        print_summary(metadata['total_samples'], metadata['total_duration'], metadata['shard_count'], metadata['max_shard_size'], _elapsed)
+
                 buffer.append((key, sample))
 
                 if len(buffer) >= self.samples_per_shard:
