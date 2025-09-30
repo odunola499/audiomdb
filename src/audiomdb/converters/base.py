@@ -267,7 +267,7 @@ class BaseConverter(ABC):
 
         try:
             with env.begin(write=True) as txn:
-                for key, sample in samples:
+                for key, sample in tqdm(samples, desc = 'Writing Shard'):
                     sample = process_sample(sample, processors or {})
                     if first_sample is None:
                         first_sample = sample
