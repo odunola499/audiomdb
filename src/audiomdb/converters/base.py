@@ -205,8 +205,6 @@ def process_samples(samples: List[Dict], processors: dict = None, sample_rate: i
 
 
 
-
-
 class BaseConverter(ABC):
     """
     Convert datasets into sharded LMDB format.
@@ -330,7 +328,7 @@ class BaseConverter(ABC):
         first_sample = None
 
         try:
-            processed_samples = process_samples([sample for _, sample in samples], processors, sample_rate)
+            processed_samples = process_samples([sample for _, sample in tqdm(samples, desc = "Processing Files")], processors, sample_rate)
             
             with env.begin(write=True) as txn:
                 for (key, _), processed_sample in tqdm(zip(samples, processed_samples), desc='Writing Shard', total=len(samples)):
