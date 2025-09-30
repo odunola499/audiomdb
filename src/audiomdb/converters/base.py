@@ -257,9 +257,11 @@ class BaseConverter(ABC):
         :return:
         """
         shard_path = os.path.join(output_dir, f"shard_{shard_id:05d}")
+        print(f"Opening shard {shard_path}")
         env = lmdb.open(
             shard_path, map_size=map_size
         )
+        print(f"Opened {shard_path}")
         shard_duration = 0.0
         first_sample = None
 
@@ -271,10 +273,11 @@ class BaseConverter(ABC):
                         first_sample = sample
                     shard_duration += sample.get('duration', 0.0)
                     txn.put(key.encode("utf-8"), pickle.dumps(sample))
-
+            print(f"Written shard {shard_path}")
             env.sync()
         finally:
             env.close()
+            print(f"Closed {shard_path}")
         return shard_path, shard_duration, first_sample
 
     def convert(self) -> None:
@@ -324,7 +327,7 @@ class BaseConverter(ABC):
                 total_duration += shard_duration
                 if test_sample is None:
                     test_sample = first_sample
-                size = os.path.getsize(shard_path)
+                size = os.path.getsize(os.path.join(shard_path,'data.mdb'))
                 checksum = compute_checksum(shard_path)
 
                 shard_infos.append({
@@ -356,7 +359,7 @@ class BaseConverter(ABC):
             total_duration += shard_duration
             if test_sample is None:
                 test_sample = first_sample
-            size = os.path.getsize(shard_path)
+            size = os.path.getsize(os.path.join(shard_path,'data.mdb'))
             checksum = compute_checksum(shard_path)
 
             del buffer
@@ -479,7 +482,7 @@ class BaseConverter(ABC):
                     shard_id, samples = task
 
                     def callback(shard_path, shard_id=shard_id):
-                        size = os.path.getsize(shard_path)
+                        size = os.path.getsize(os.path.join(shard_path,'data.mdb'))
                         checksum = compute_checksum(shard_path)
                         with metadata_lock:
                             metadata["shards"].append({
