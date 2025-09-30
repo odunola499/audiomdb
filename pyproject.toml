@@ -20,7 +20,9 @@ dependencies = [
     "transformers",
     "pyyaml",
     "pytest",
-    "huggingface-hub"
+    "huggingface-hub",
+  "boto3",
+  "google-cloud-storage"
 ]
 
 [project.optional-dependencies]

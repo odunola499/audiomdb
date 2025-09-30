@@ -12,13 +12,16 @@ class HFDataRetriever(BaseRetriever):
                  repo_id:str,
                  allow_patterns = 'shard_*',
                  cache_dir = 'cache_dir',
-                 prefetch_into_cache = None):
-        super().__init__(
-            cache_dir=cache_dir,
-            prefetch_into_cache=None
-        )
+                 prefetch = -1):
         self.repo_id = repo_id
         self.allow_patterns = allow_patterns
+        super().__init__(
+            cache_dir=cache_dir,
+            prefetch=prefetch
+        )
+        os.makedirs(self.cache_dir, exist_ok=True)
+        self.file_ids = [os.path.basename(p) for p in self.file_ids]
+
 
     def download_metadata(self):
         """
@@ -34,27 +37,33 @@ class HFDataRetriever(BaseRetriever):
         return file_path
 
     def get_file_into_cache(self, file_id) -> str:
-        if file_id in os.listdir(self.cache_dir):
-            return os.path.join(self.cache_dir, file_id)
+        name = os.path.basename(file_id)
+        shard_dir = os.path.join(self.cache_dir, name)
+        if os.path.isdir(shard_dir):
+            return shard_dir
 
-        path = snapshot_download(
-            repo_id = self.repo_id,
-            allow_patterns = file_id,
-            local_dir =  self.cache_dir
+        snapshot_download(
+            repo_id=self.repo_id,
+            allow_patterns=f"{name}/*",
+            local_dir=self.cache_dir,
+            cache_dir=self.cache_dir,
+            local_dir_use_symlinks=False
         )
-        return path
+        return shard_dir
 
     def delete_file_from_cache(self, path):
         shutil.rmtree(path)
 
     def prefetch_files(self, n:int):
-        """
-        Prefetch n files into the local cache. Happens at the start of the training.
-        """
-        patterns = [f"shard_{i}" for i in range(n)]
+        patterns = [f"{os.path.basename(p)}/*" for p in self.file_ids[:n]]
+        if not patterns:
+            return
         snapshot_download(
-            repo_id = self.repo_id,
-            allow_patterns = patterns,
-            local_dir =  self.cache_dir
+            repo_id=self.repo_id,
+            allow_patterns=patterns,
+            local_dir=self.cache_dir,
+            cache_dir=self.cache_dir,
+            local_dir_use_symlinks=False,
+            max_workers=max(os.cpu_count() - 2, 1)
         )
 

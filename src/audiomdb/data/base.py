@@ -1,79 +1,87 @@
-from torch.utils.data import IterableDataset #might not need this
-from abc import ABC, abstractmethod
 import os
-import asyncio
 import json
-from typing import Literal
 from concurrent.futures import ThreadPoolExecutor
 import queue
-import time
 import threading
-import lmdb
-import pickle
+from audiomdb.retrievers import BaseRetriever
 
-class StreamingDataset(ABC):
-    def __init__(self, local_dir:str, num_threads = 4, queue_size = 2000):
+class StreamingDataset:
+    def __init__(self, local_dir:str, retriever:BaseRetriever, num_threads = 4, queue_size = 2000):
         super().__init__()
         self.local_dir = local_dir
-        manifest_file = os.path.join(self.local_dir, 'metadata.json')
-        with open(manifest_file, 'r') as fp:
-            metadata = json.load(fp)
-        self.metadata = metadata
+
+        self.metadata = retriever.metadata
+        self.retriever = retriever
 
         self.num_threads = num_threads
-        self._finished = threading.Event() #We'd use this to get more files?
-        self._active_threads = threading.Semaphore(0)
+        self._finished = threading.Event()
+        self._file_semaphore = threading.Semaphore(num_threads)
 
         self.output_queue = queue.Queue(maxsize = queue_size)
 
-    def prefetch_files(self, n):
-        """
-        Retriever refetches n files into local cache, depends on cache size allocation if set
-        :param n:
-        :return:
-        """
+        self.executor = ThreadPoolExecutor(
+            max_workers=num_threads,
+            thread_name_prefix="FileReader"
+        )
+        if getattr(self.retriever, 'manager', None):
+            for fid in self.retriever.file_ids[: max(2 * num_threads, 4)]:
+                self.retriever.manager.request(fid)
+        self.begin(self.retriever.file_ids)
 
-    def process_file(self, shard_path:str):
-        # If shard path not in local dir then download it
-        env = lmdb.open(shard_path, readonly=True, lock = False)
-        with env.begin(write = False) as txn:
-            cursor = txn.cursor()
-            for key, value in cursor:
-                if self._finished.is_set():
-                    #add recursion to get new file and continue
-                    break
+    def process_file(self, file_id:str):
+        with self._file_semaphore:
+            try:
+                iterator = self.retriever.load_file(file_id)
+                for sample in iterator:
+                    if self._finished.is_set():
+                        break
 
-                sample = pickle.loads(value)
-                self.output_queue.put(sample)
-
-    def probe(self):
-        #probe has to help tell what features are bytes and need to be unpicked
-        return self.metadata
-
-    def begin(self, file_paths):
-        #file_paths can just be something from the metadata file
-        with ThreadPoolExecutor(max_workers = self.num_threads,
-                                thread_name_prefix="FileReader") as executor:
-            futures = []
-            for filepath in file_paths:
-                self._active_threads.acquire(blocking = False)
-                future = executor.submit(self.process_file, filepath)
-                futures.append(future)
-
-            def monitor_completion():
-                for future in futures:
-                    future.result()
+                    while not self._finished.is_set():
+                        try:
+                            self.output_queue.put(sample, timeout=1)
+                            break
+                        except queue.Full:
+                            continue
+            except Exception as e:
+                self.output_queue.put(e)
                 self._finished.set()
+            finally:
+                file_path = os.path.join(self.retriever.cache_dir, os.path.basename(file_id))
+                if os.path.isdir(file_path):
+                    self.retriever.delete_file_from_cache(file_path)
 
-            threading.Thread(target = monitor_completion, daemon = True).start()
+
+    def begin(self, file_ids):
+        futures = []
+        for file_id in file_ids:
+            future = self.executor.submit(self.process_file, file_id)
+            futures.append(future)
+
+        def monitor_completion():
+            for future in futures:
+                future.result()
+            self._finished.set()
+
+        threading.Thread(target = monitor_completion, daemon = True).start()
 
     def __iter__(self):
         return self
 
-    def __next(self):
+    def __next__(self):
         while True:
             try:
-                return self.output_queue.get(timeout = 0.1)
+                item = self.output_queue.get(timeout = 0.1)
+                if isinstance(item, Exception):
+                    raise item
+                return item
             except queue.Empty:
                 if self._finished.is_set() and self.output_queue.empty():
                     raise StopIteration
+
+        if getattr(self.retriever, 'manager', None):
+            self.retriever.manager.shutdown()
+
+
+    def close(self):
+        self._finished.set()
+        self.executor.shutdown(wait = True)

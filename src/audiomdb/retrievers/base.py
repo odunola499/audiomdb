@@ -1,19 +1,37 @@
 from abc import ABC, abstractmethod
 import os
 import json
+from typing import Optional
+import lmdb
+import pickle
+import time
+
+from .cache_manager import CacheManager
+
 
 class BaseRetriever(ABC):
     """
     Abstract base class for all retrievers.
     Retrievers fetch data from various sources like hf, s3 ,gcp , local files, etc
     """
-    def __init__(self, cache_dir:str = None, prefetch_into_cache:int = None):
+    def __init__(self, cache_dir:str = None, prefetch:Optional[int] = None, max_cache_bytes: Optional[int] = None, background: bool = True, workers: int = 2):
         self.cache_dir = cache_dir
         metadata_path = self.download_metadata()
         with open(metadata_path, 'r') as fp:
             self.metadata = json.load(fp)
 
-        self.shard_paths = [shard["path"] for shard in self.metadata["shards"]]
+        self.file_ids = [shard["path"] for shard in self.metadata["shards"]]
+
+        self.manager = CacheManager(self, cache_dir=self.cache_dir, max_cache_bytes=max_cache_bytes, workers=workers) if background else None
+
+        if prefetch:
+            if prefetch == -1:
+                prefetch = len(self.file_ids)
+            if self.manager:
+                for fid in self.file_ids[:prefetch]:
+                    self.manager.request(fid)
+            else:
+                self.prefetch_files(prefetch)
 
 
     @abstractmethod
@@ -35,6 +53,34 @@ class BaseRetriever(ABC):
         """
         pass
 
+    def load_file(self, file_id):
+        if self.manager:
+            self.manager.request(file_id)
+            t0 = 0.0
+            while not self.manager.has(file_id):
+                time.sleep(0.05)
+                t0 += 0.05
+                if t0 > 60:
+                    break
+            self.manager.mark_used(file_id)
+            file_path = os.path.join(self.cache_dir, os.path.basename(file_id))
+        else:
+            file_path = self.get_file_into_cache(file_id)
+        env = lmdb.open(file_path, readonly = True, lock = False)
+        try:
+            with env.begin(write = False) as txn:
+                cursor = txn.cursor()
+                for key, value in cursor:
+                    try:
+                        sample = pickle.loads(value)
+                        yield sample
+                    except Exception as e:
+                        print(f"Failed to deserialize sample {key}: {e}")
+                        continue
+        finally:
+            env.close()
+
+
 
     @abstractmethod
     def delete_file_from_cache(self, path):
@@ -44,7 +90,7 @@ class BaseRetriever(ABC):
         pass
 
     @abstractmethod
-    def prefech_files(self, n:int):
+    def prefetch_files(self, n:int):
         """
         Prefetch n files into the local cache.
         This method should manage the cache size and ensure that it does not exceed the allocated space.
@@ -59,13 +105,11 @@ class BaseRetriever(ABC):
         """
 
         if not verbose:
-            metadata = self.metadata.pop("shards", None)
+            metadata = {k: v for k, v in self.metadata.items() if k != "shards"}
         else:
             metadata = self.metadata
-            metadata['shard_paths'] = self.shard_paths
+            metadata['shard_paths'] = self.file_ids
         return metadata
 
 
-    def read_shard(self):
-        pass
 

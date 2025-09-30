@@ -116,7 +116,7 @@ class BaseConverter(ABC):
             self,
             output_dir:str,
             samples_per_shard:int = 50_000,
-            map_size:int = 1 << 40,
+            map_size:int = 10 * 1024^ 3,
             num_workers:int = 4,
             processors:dict = None
     ):
@@ -126,6 +126,17 @@ class BaseConverter(ABC):
         os.makedirs(output_dir, exist_ok = True)
         self.num_workers = min(num_workers, mp.cpu_count())
         self.processors = processors or {}
+        will_store_audio_bytes = True
+        for _, plist in self.processors.items():
+            for column_name, proc in plist:
+                if column_name == 'audio' and getattr(proc, 'keep_original', False) is False:
+                    will_store_audio_bytes = False
+                    break
+            if not will_store_audio_bytes:
+                break
+        if will_store_audio_bytes and self.samples_per_shard > 1000:
+            print("audio bytes detected in shards; reducing samples_per_shard to 1000")
+            self.samples_per_shard = 1000
 
 
     @abstractmethod
@@ -140,7 +151,7 @@ class BaseConverter(ABC):
 
 
     @staticmethod
-    def _write_shard(shard_id:int, samples:list, output_dir, map_size, processors:dict = None) -> str:
+    def _write_shard(shard_id:int, samples:list, output_dir, map_size, processors:dict = None) -> tuple:
         """
         Write a shard to LMDB.
         Args:
@@ -156,18 +167,21 @@ class BaseConverter(ABC):
             shard_path, map_size = map_size
         )
         shard_duration = 0.0
+        first_sample = None
         
         try:
             with env.begin(write = True) as txn:
                 for key, sample in samples:
                     sample = process_sample(sample, processors or {})
+                    if first_sample is None:
+                        first_sample = sample
                     shard_duration += sample.get('duration', 0.0)
                     txn.put(key.encode("utf-8"), pickle.dumps(sample))
 
             env.sync()
         finally:
             env.close()
-        return shard_path, shard_duration
+        return shard_path, shard_duration, first_sample
 
     def convert(self) -> None:
         """
@@ -203,8 +217,10 @@ class BaseConverter(ABC):
             total_samples += 1
 
             if len(buffer) >= self.samples_per_shard:
-                shard_path, shard_duration = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+                shard_path, shard_duration, first_sample = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
                 total_duration += shard_duration
+                if test_sample is None:
+                    test_sample = first_sample
                 size = os.path.getsize(shard_path)
                 checksum = compute_checksum(shard_path)
 
@@ -229,8 +245,10 @@ class BaseConverter(ABC):
                 buffer_position = 0
 
         if buffer:
-            shard_path, shard_duration = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
+            shard_path, shard_duration, first_sample = BaseConverter._write_shard(shard_id, buffer, self.output_dir, self.map_size, self.processors)
             total_duration += shard_duration
+            if test_sample is None:
+                test_sample = first_sample
             size = os.path.getsize(shard_path)
             checksum = compute_checksum(shard_path)
 
@@ -252,7 +270,7 @@ class BaseConverter(ABC):
 
         if 'audio' in test_sample:
             if isinstance(test_sample['audio'], bytes):
-                test_sample['audio'] = 'ndarray in bytes' #todo: figure out a better way to do this
+                test_sample['audio'] = 'audio in bytes'
         info = {
             "dataset_name": getattr(self, "dataset_name", "unknown"),
             "version": getattr(self, "dataset_version", "unknown"),
@@ -352,7 +370,7 @@ class BaseConverter(ABC):
                         pool.apply_async(
                             BaseConverter._write_shard,
                             args=(shard_id, samples, self.output_dir, self.map_size, self.processors),
-                            callback=lambda res, shard_id=shard_id: callback(res[0], shard_id)
+                            callback=lambda res, shard_id=shard_id: (callback(res[0], shard_id), metadata.__setitem__('test_sample', metadata.get('test_sample') or (res[2] if isinstance(res[2].get('audio', None), (bytes, bytearray)) and not metadata.get('test_sample') else res[2])))
                         )
                     )
 
@@ -371,13 +389,15 @@ class BaseConverter(ABC):
             for t in tasks:
                 res = t.get()
                 with metadata_lock:
+                    if metadata['test_sample'] is None:
+                        metadata['test_sample'] = res[2]
                     metadata['total_duration'] += res[1]
 
         producer_thread.join()
 
         test_sample = metadata['test_sample']
         if 'audio' in test_sample and isinstance(test_sample['audio'], bytes):
-            metadata['test_sample']['audio'] = 'ndarray in bytes'
+            metadata['test_sample']['audio'] = 'audio in bytes'
 
         info = {
             "dataset_name": getattr(self, "dataset_name", "unknown"),
@@ -397,15 +417,22 @@ class BaseConverter(ABC):
 
         print('Done')
 
-    def run(self):
-        """
-        Run the conversion process, using multiprocessing if specified.
-        :return:
-        """
+    def run(self, upload: str = None, **kwargs):
         if self.num_workers > 1:
             self.mp_convert()
         else:
             self.convert()
+        if upload:
+            from audiomdb.uploaders import S3Uploader, GCPUploader, HFUploader
+            if upload == 's3':
+                uploader = S3Uploader(**kwargs)
+            elif upload == 'gcp':
+                uploader = GCPUploader(**kwargs)
+            elif upload == 'hf':
+                uploader = HFUploader(**kwargs)
+            else:
+                raise ValueError("Unsupported upload type")
+            uploader.upload_dir(self.output_dir)
 
 
     @property

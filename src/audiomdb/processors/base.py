@@ -84,33 +84,5 @@ class TextProcessor(ABC):
         """
         pass
 
-    @property
-    @abstractmethod
-    def pad_token(self):
-        pass
 
-    @property
-    @abstractmethod
-    def pad_token_id(self):
-        pass
-
-    @property
-    @abstractmethod
-    def eos_token(self):
-        pass
-
-    @property
-    @abstractmethod
-    def eos_token_id(self):
-        pass
-
-    @property
-    @abstractmethod
-    def bos_token(self):
-        pass
-
-    @property
-    @abstractmethod
-    def bos_token_id(self):
-        pass
 
