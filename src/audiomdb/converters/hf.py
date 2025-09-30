@@ -15,7 +15,7 @@ class HFConverter(BaseConverter):
     def __init__(self, data_id:str,
                  output_dir: str,
                  samples_per_shard: int = 50_000,
-                 map_size: int = 1 << 40,
+                 map_size: int = 10 * 1024 ** 3,
                  num_workers: int = 4,
                  processors: dict = None,
                  audio_column:str = "audio",
