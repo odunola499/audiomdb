@@ -1,0 +1,1 @@
+from audiomdb.processors.base import BaseProcessor

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audiomdb"
+version = "0.1.0"
+description = "A library for converting and loading audio datasets in LMDB format for training."
+authors = [
+  { name="Odunola Jenrola", email="jenrola2292@email.com" }
+]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "librosa",
+  "datasets",
+  "lmdb",
+    "audiomentations",
+    "transformers",
+    "pyyaml",
+    "pytest",
+    "huggingface-hub",
+  "boto3",
+  "google-cloud-storage",
+  "rich"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "flake8",
+  "black",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

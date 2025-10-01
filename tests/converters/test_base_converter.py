@@ -3,8 +3,7 @@ import shutil
 import numpy as np
 import pytest
 from unittest.mock import patch
-from src.converters.base import BaseConverter, load_array, process_sample
-
+from src.audiomdb.converters.base import BaseConverter, load_array, process_sample
 
 class MockConverter(BaseConverter):
     def __init__(self, *args, **kwargs):

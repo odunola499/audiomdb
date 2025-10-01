@@ -1,9 +1,7 @@
 import tempfile
 import shutil
-import numpy as np
-import pytest
 from unittest.mock import patch, MagicMock
-from src.converters.hf_converter import HFConverter
+from src.audiomdb.converters.hf import HFConverter
 
 
 class TestHFConverter:
@@ -13,7 +11,7 @@ class TestHFConverter:
     def teardown_method(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    @patch('src.converters.hf_converter.load_dataset')
+    @patch('src.audiomdb.converters.hf.load_dataset')
     def test_hf_converter_init(self, mock_load_dataset):
         mock_dataset = MagicMock()
         mock_dataset.cast_column.return_value = mock_dataset
@@ -30,7 +28,7 @@ class TestHFConverter:
         assert converter.text_column == "text"
         mock_load_dataset.assert_called_once()
 
-    @patch('src.converters.hf_converter.load_dataset')
+    @patch('src.audiomdb.converters.hf.load_dataset')
     def test_sample_iterator(self, mock_load_dataset):
         mock_data = [
             {"audio": {"bytes": b"fake_audio_data"}, "text": "hello"},
@@ -51,7 +49,7 @@ class TestHFConverter:
         assert samples[0][0] == "sample_00000000"
         assert samples[1][0] == "sample_00000001"
 
-    @patch('src.converters.hf_converter.load_dataset')
+    @patch('src.audiomdb.converters.hf.load_dataset')
     def test_converter_name(self, mock_load_dataset):
         mock_dataset = MagicMock()
         mock_dataset.cast_column.return_value = mock_dataset
@@ -63,7 +61,7 @@ class TestHFConverter:
         )
         assert converter.converter_name == 'hf'
 
-    @patch('src.converters.hf_converter.load_dataset')
+    @patch('src.audiomdb.converters.hf.load_dataset')
     def test_with_store_columns(self, mock_load_dataset):
         mock_data = [
             {

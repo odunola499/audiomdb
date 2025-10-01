@@ -1,42 +1,41 @@
 import os
 import json
 from typing import Optional, List
-from src.converters.base import BaseConverter
-
+from audiomdb.converters.base import BaseConverter
 
 class FileConverter(BaseConverter):
     """
-    Convert an audio dataset described by a manifest file into sharded LMDB format.
+    Convert an audio dataset described by a JSONL manifest into sharded LMDB.
 
-    The manifest file should be a JSONL (one JSON object per line) with fields:
-        {
-            "audio_filepath": "/path/to/audio.wav",
-            "text": "transcription text",
-            "duration": 3.45,        # optional
-            "speaker": "spk123"      # optional
-        }
+    Each line in the manifest is a JSON object, typically including:
+    - audio_filepath: path to an audio file
+    - text: optional transcription
+    - duration, speaker, etc.: optional metadata
 
-    Example:
-        converter = FileConverter(
-            manifest="data/train_manifest.json",
-            output_dir="./lmdb_train",
-            samples_per_shard=10000,
-            sample_rate=16000
-        )
-        converter.convert()
+    The converter loads file paths, defers decoding to the writer, applies any
+    configured processors, and writes shards and a metadata.json.
     """
 
     def __init__(
         self,
         manifest: str,
-        *args,
+        output_dir:str,
+        samples_per_shard:int = 50_000,
+        map_size:int = 1 << 40,
+        num_workers:int = 4,
+        processors:dict = None,
         audio_column: str = "audio_filepath",
-        text_column: str = "text",
+        text_column: Optional[str] = "text",
         store_columns: Optional[List[str]] = None,
         sample_rate: int = 16000,
-        **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            output_dir=output_dir,
+            samples_per_shard = samples_per_shard,
+            map_size = map_size,
+            num_workers = num_workers,
+            processors = processors,
+            )
 
         if not os.path.exists(manifest):
             raise FileNotFoundError(f"Manifest file {manifest} not found.")
@@ -46,6 +45,9 @@ class FileConverter(BaseConverter):
         self.text_column = text_column
         self.store_columns = store_columns
         self.sample_rate = sample_rate
+
+        self.dataset_name = manifest
+        self.version = manifest
 
         with open(manifest, "r", encoding="utf-8") as f:
             self.entries = [json.loads(line) for line in f]
@@ -70,5 +72,7 @@ class FileConverter(BaseConverter):
 
             yield key, sample
 
+    @property
+    @property
     def converter_name(self) -> str:
         return "manifest_file"

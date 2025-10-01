@@ -3,7 +3,7 @@ import shutil
 import json
 import os
 import pytest
-from src.converters.file_converter import FileConverter
+from src.audiomdb.converters.local import FileConverter
 
 
 class TestFileConverter:
