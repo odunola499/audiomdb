@@ -12,7 +12,7 @@ AudioMDB addresses this by providing a **high-performance, extensible framework*
 
 ## Philosophy
 
-AudioMDB is designed for **high-throughput machine learning training** with large-scale audio datasets. Here's what makes it fast:
+AudioMDB is designed for **high-throughput machine learning training** with small, medium andlarge-scale audio datasets. Here's what makes it fast:
 
 ### Lightning Memory-Mapped Database (LMDB)
 - **Zero-copy reads**: Data is memory-mapped directly from disk, eliminating buffer copies
@@ -53,7 +53,7 @@ for batch in dataloader:
 - **Cache locality**: Hot shards stay in cache, cold shards evicted automatically
 
 ### Multi-Dataset Training
-- **CombinedDataset**: Seamlessly combine multiple datasets with different shuffling strategies
+- **CombinedDataset**: You can combine multiple datasets similar to [MosaicStreaming](https://github.com/mosaicml/streaming?tab=readme-ov-file) and try different shuffling strategies
   - `shuffle='pseudo'`: Random sampling across datasets for balanced training
   - `shuffle='ordered'`: Round-robin sampling maintains dataset proportions  
   - `shuffle=None`: Sequential iteration through all datasets
@@ -61,12 +61,12 @@ for batch in dataloader:
 - **Mixed sources**: Combine local, cloud, and streaming datasets in one training loop
 
 ```python
-# Train on multiple datasets simultaneously
+# Load multiple datasets simultaneously
 local_dataset = StreamingDataset(LocalRetriever("./speech_data"))
 cloud_dataset = StreamingDataset(S3Retriever("bucket", "music_data"))
 hf_dataset = StreamingDataset(HFRetriever("mozilla/common_voice"))
 
-# Pseudo-random sampling across all datasets
+# pass into CombinedDataset and specify desired sampling
 combined = CombinedDataset([local_dataset, cloud_dataset, hf_dataset], shuffle='pseudo')
 dataloader = DataLoader(combined, batch_size=32)
 
