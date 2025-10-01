@@ -1,4 +1,4 @@
-from audiomdb.data.base import StreamingDataset, C
+from audiomdb.data.base import StreamingDataset, CombinedDataset
 
 from audiomdb.retrievers.hf import HFDataRetriever
 from audiomdb.retrievers.s3 import S3DataRetriever
