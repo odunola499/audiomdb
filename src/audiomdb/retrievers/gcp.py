@@ -6,7 +6,8 @@ from audiomdb.retrievers.base import BaseRetriever
 try:
     from google.cloud import storage
 except Exception:
-    storage = None
+    raise ImportError(f"Warning: google-cloud-storage not installed")
+
 
 
 class GCPDataRetriever(BaseRetriever):

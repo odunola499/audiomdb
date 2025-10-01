@@ -49,8 +49,6 @@ class BaseRetriever(ABC):
     def download_metadata(self):
         """
         Download or fetch metadata from the data source into a local cache directory.
-        If the metadata is already in the cache, it should not be downloaded again.
-        Return the local path to the cached metadata file.
         """
         pass
 
@@ -58,9 +56,8 @@ class BaseRetriever(ABC):
     @abstractmethod
     def get_file_into_cache(self, file_id) -> str:
         """
-        Download or fetch a file or metadata from the data source into a local cache directory.
-        If the file is already in the cache, it should not be downloaded again.
-        Return the local path to the cached file.
+        Download or fetch a file from the data source into a local cache directory.
+
         """
         pass
 

@@ -1,4 +1,4 @@
-from audiomdb.processors import AudioProcessor
+from audiomdb.processors import BaseProcessor
 from audiomentations import Compose, AddGaussianNoise, TimeStretch, PitchShift, Shift
 
 test_augment = Compose([
@@ -9,7 +9,7 @@ test_augment = Compose([
 ])
 
 
-class AudiomentationsProcessor(AudioProcessor):
+class AudiomentationsProcessor(BaseProcessor):
     """
     Audio processor that applies augmentations using the audiomentations library.
     Example:
