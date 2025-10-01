@@ -4,7 +4,7 @@ from .base import BaseUploader
 try:
     from huggingface_hub import HfApi, HfFolder, create_repo, upload_folder
 except Exception:
-    print("huggingface-hub library not found. HF uploads will not work.")
+    raise ImportError("huggingface-hub library not found. HF uploads will not work.")
     HfApi = None
 
 
