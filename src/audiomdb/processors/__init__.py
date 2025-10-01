@@ -1,1 +1,1 @@
-from audiomdb.processors.base import AudioProcessor, TextProcessor
+from audiomdb.processors.base import BaseProcessor

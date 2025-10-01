@@ -1,5 +1,6 @@
 from audiomdb.converters.base import BaseConverter
 from datasets import load_dataset, Audio
+from audiomdb.processors.base import BaseProcessor
 from typing import Optional
 
 
@@ -17,7 +18,7 @@ class HFConverter(BaseConverter):
                  samples_per_shard: int = 50_000,
                  map_size: int = 10 * 1024 ** 3,
                  num_workers: int = 4,
-                 processors: dict = None,
+                 processor: BaseProcessor = None,
                  audio_column:str = "audio",
                  text_column:Optional[str] = "text",
                  store_columns:Optional[list] = None,
@@ -35,8 +36,9 @@ class HFConverter(BaseConverter):
             samples_per_shard=samples_per_shard,
             map_size=map_size,
             num_workers=num_workers,
-            processors=processors,
-            limit_iteration=limit_iteration
+            processor=processor,
+            limit_iteration=limit_iteration,
+            sample_rate=sample_rate
         )
         dataset = load_dataset(data_id,
                                     data_name,

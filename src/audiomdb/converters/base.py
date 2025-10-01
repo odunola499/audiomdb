@@ -11,7 +11,7 @@ import io
 import multiprocessing as mp
 from queue import Queue, Empty
 import threading
-from audiomdb.processors import AudioProcessor
+from audiomdb.processors.base import BaseProcessor
 from tqdm.auto import tqdm
 
 from rich.console import Console
@@ -68,69 +68,29 @@ def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
         raise ValueError(f"Unsupported data type for load_array, got {type(data)}")
 
 
-def process_sample(sample: dict, processors: dict = None) -> dict:
-    """Decode, process, and serialize a sample ready for LMDB.
-
-    Decodes audio into a float32 numpy array, annotates shape/dtype/duration,
-    applies configured processors, and converts any remaining audio ndarray to
-    bytes for storage.
-
-    Args:
-        sample: The input sample dict with at least 'audio' and 'sample_rate'.
-        processors: A mapping from column name to list of (column_name, processor).
-
-    Returns:
-        A dictionary ready to be serialized into LMDB.
-    """
-    audio_bytes = sample.get('audio', None)
+def process_sample(sample: dict, processor: BaseProcessor = None, **kwargs) -> dict:
+    """Decode, process, and serialize a sample ready for LMDB."""
+    audio_bytes = sample.get('audio')
     if audio_bytes is None:
         raise ValueError("Sample does not contain 'audio' data.")
 
-    audio_array = load_array(data=audio_bytes, sample_rate=sample.get('sample_rate', 16000))
+    audio_array = load_array(data=audio_bytes, sample_rate=sample.get('sample_rate', kwargs.get('sample_rate', 16000)))
     sample['audio'] = audio_array.astype(np.float32)
     sample['shape'] = audio_array.shape
     sample['dtype'] = str(audio_array.dtype)
-    sample['duration'] = len(audio_array) / sample.get('sample_rate', 16000)
+    sample['duration'] = len(audio_array) / sample.get('sample_rate', kwargs.get('sample_rate', 16000))
 
-    final_results = sample.copy()
+    if processor:
+        result = processor.process(sample, **kwargs)
+        del audio_array
+        gc.collect()
+        return result
+    
+    # No processor, just convert audio to bytes
+    sample['audio'] = sample['audio'].tobytes()
     del audio_array
-
-    if processors:
-        for processor_type, processor_list in processors.items():
-            if processor_list:
-                for column_name, proc in processor_list:
-                    data = sample.get(column_name, None)
-                    if data is None:
-                        raise ValueError(
-                            f"Sample does not contain '{column_name}' data. Did you include {column_name} in `store_columns`?")
-
-                    if isinstance(proc, AudioProcessor):
-                        result = proc.process(data, sample_rate=sample.get('sample_rate', 16000))
-                    else:
-                        result = proc.process(data)
-
-                    if proc.keep_original:
-                        final_results.update(result)
-                    else:
-                        if column_name == 'audio':
-                            final_results.pop('audio', None)
-                            final_results.pop('shape', None)
-                            final_results.pop('dtype', None)
-                        else:
-                            final_results.pop(column_name, None)
-
-                        final_results.update(result)
-
-    if 'audio' in final_results:
-        current_audio = final_results['audio']
-        if isinstance(current_audio, np.ndarray):
-            final_results['audio'] = current_audio.tobytes()
-            final_results['shape'] = current_audio.shape
-            final_results['dtype'] = current_audio.dtype
-
-    del sample
     gc.collect()
-    return final_results
+    return sample
 
 
 class BaseConverter(ABC):
@@ -156,25 +116,22 @@ class BaseConverter(ABC):
             samples_per_shard: int = 50_000,
             map_size: int = 500 * 1024 ** 3,
             num_workers: int = 4,
-            processors: dict = None,
-            limit_iteration:int = -1
+            processor: BaseProcessor = None,
+            limit_iteration: int = -1,
+            sample_rate: int = 16000,
     ):
         self.output_dir = output_dir
         self.samples_per_shard = samples_per_shard
         self.map_size = map_size
+        self.sample_rate = sample_rate
 
         os.makedirs(output_dir, exist_ok=True)
 
         self.num_workers = min(num_workers, mp.cpu_count())
-        self.processors = processors or {}
+        self.processor = processor
         will_store_audio_bytes = True
-        for _, plist in self.processors.items():
-            for column_name, proc in plist:
-                if column_name == 'audio' and getattr(proc, 'keep_original', False) is False:
-                    will_store_audio_bytes = False
-                    break
-            if not will_store_audio_bytes:
-                break
+        if processor and not getattr(processor, 'keep_original', True):
+            will_store_audio_bytes = False
         if will_store_audio_bytes and self.samples_per_shard > 1000:
             print("audio bytes detected in shards; reducing samples_per_shard to 1000")
             self.samples_per_shard = 1000
@@ -185,9 +142,17 @@ class BaseConverter(ABC):
     def sample_iterator(self):
         """
         Yield (key, sample) pairs.
-        `sample` should be serializable (pickle, msgpack, etc.).
+        `sample` should be serializable (pickle, msgpack, etc.). yielded audio data must be in bytes or numpy array format.
         Example:
             yield "sample_00001", {"audio": audio_array, "text": "hello world"}
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def converter_name(self) -> str:
+        """
+        Return a unique name for the converter.
         """
         pass
 
@@ -200,8 +165,7 @@ class BaseConverter(ABC):
 
     def print_header(self):
         console = Console() if Console else None
-        processors_list = [p.__class__.__name__ for plist in self.processors.values() for _, p in plist]
-        processors_str = ", ".join(processors_list) if processors_list else "None"
+        processor_name = self.processor.__class__.__name__ if self.processor else "None"
         map_str = BaseConverter.human_bytes(self.map_size)
         mode = f"multithreading ({self.num_workers} workers)" if self.num_workers > 1 else "single-process"
         if console and Panel and Table and Text:
@@ -210,14 +174,14 @@ class BaseConverter(ABC):
             table.add_row(f"Output: {os.path.abspath(self.output_dir)}")
             table.add_row(f"Mode: {mode}")
             table.add_row(f"Sharding: {self.samples_per_shard} samples/shard, map_size={map_str}")
-            table.add_row(f"Processors: {processors_str}")
+            table.add_row(f"Processor: {processor_name}")
             console.print(Panel(table, title="AudioMDB Conversion", expand=True))
         else:
             print(f"Dataset: {getattr(self, 'dataset_name', 'unknown')}")
             print(f"Output: {os.path.abspath(self.output_dir)}")
             print(f"Mode: {mode}")
             print(f"Sharding: {self.samples_per_shard} samples/shard, map_size={map_str}")
-            print(f"Processors: {processors_str}")
+            print(f"Processor: {processor_name}")
 
     def print_summary(self, total_samples, total_duration, shard_count, max_shard_size, elapsed):
         console = Console() if Console else None
@@ -245,34 +209,22 @@ class BaseConverter(ABC):
             print(f"Elapsed: {elapsed:.2f} s")
 
     @staticmethod
-    def _write_shard(shard_id: int, samples: list, output_dir, map_size, processors: dict = None) -> tuple:
-        """
-        Write a shard to LMDB.
-        Args:
-        :param shard_id:
-        :param samples:
-        :param output_dir:
-        :param map_size:
-        :param processors:
-        :return:
-        """
+    def _write_shard(shard_id: int, samples: list, output_dir, map_size, processor: BaseProcessor = None, sample_rate: int = 16000) -> tuple:
         shard_path = os.path.join(output_dir, f"shard_{shard_id:05d}")
         print(f"Opening shard {shard_path}")
-        env = lmdb.open(
-            shard_path, map_size=map_size
-        )
+        env = lmdb.open(shard_path, map_size=map_size)
         print(f"Opened {shard_path}")
         shard_duration = 0.0
         first_sample = None
 
         try:
             with env.begin(write=True) as txn:
-                for key, sample in tqdm(samples, desc = 'Writing Shard'):
-                    sample = process_sample(sample, processors or {})
+                for key, sample in tqdm(samples, desc='Writing Shard'):
+                    processed_sample = process_sample(sample, processor, sample_rate=sample_rate)
                     if first_sample is None:
-                        first_sample = sample
-                    shard_duration += sample.get('duration', 0.0)
-                    txn.put(key.encode("utf-8"), pickle.dumps(sample))
+                        first_sample = processed_sample
+                    shard_duration += processed_sample.get('duration', 0.0)
+                    txn.put(key.encode("utf-8"), pickle.dumps(processed_sample))
 
             print(f"Written shard {shard_path}")
             env.sync()
@@ -326,7 +278,7 @@ class BaseConverter(ABC):
 
             if len(buffer) >= self.samples_per_shard:
                 shard_path, shard_duration, first_sample = BaseConverter._write_shard(shard_id, buffer, self.output_dir,
-                                                                                      self.map_size, self.processors)
+                                                                                      self.map_size, self.processor, self.sample_rate)
                 total_duration += shard_duration
                 if test_sample is None:
                     test_sample = first_sample
@@ -358,7 +310,7 @@ class BaseConverter(ABC):
 
         if buffer:
             shard_path, shard_duration, first_sample = BaseConverter._write_shard(shard_id, buffer, self.output_dir,
-                                                                                  self.map_size, self.processors)
+                                                                                  self.map_size, self.processor, self.sample_rate)
             total_duration += shard_duration
             if test_sample is None:
                 test_sample = first_sample
@@ -392,7 +344,7 @@ class BaseConverter(ABC):
             'num_shards': shard_id,
             'max_item_in_shard': max_shard_size,
             'features': test_sample,
-            "processors_applied": [p.__class__.__name__ for plist in self.processors.values() for _, p in plist],
+            "processors_applied": [self.processor.__class__.__name__] if self.processor else [],
             "shards": shard_infos
 
         }
@@ -498,7 +450,7 @@ class BaseConverter(ABC):
                     tasks.append(
                         pool.apply_async(
                             BaseConverter._write_shard,
-                            args=(shard_id, samples, self.output_dir, self.map_size, self.processors),
+                            args=(shard_id, samples, self.output_dir, self.map_size, self.processor, self.sample_rate),
                             callback=lambda res, shard_id=shard_id: (callback(res[0], shard_id),
                                                                      metadata.__setitem__('test_sample', metadata.get(
                                                                          'test_sample') or (res[2] if isinstance(
@@ -542,7 +494,7 @@ class BaseConverter(ABC):
             "num_shards": metadata['shard_count'],
             "max_item_in_shard": metadata['max_shard_size'],
             "features": metadata['test_sample'],
-            "processors_applied": [p.__class__.__name__ for plist in self.processors.values() for _, p in plist],
+            "processors_applied": [self.processor.__class__.__name__] if self.processor else [],
             "shards": metadata['shards']
         }
 
@@ -570,10 +522,3 @@ class BaseConverter(ABC):
                 raise ValueError("Unsupported upload type")
             uploader.upload_dir(self.output_dir)
 
-    @property
-    @abstractmethod
-    def converter_name(self) -> str:
-        """
-        Return a unique name for the converter.
-        """
-        pass
