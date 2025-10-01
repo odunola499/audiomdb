@@ -3,8 +3,10 @@ from concurrent.futures import ThreadPoolExecutor
 import queue
 import threading
 from audiomdb.retrievers import BaseRetriever
-from typing import Optional
+from typing import Optional, List, Literal
 from torch.utils.data import IterableDataset
+from random import choice
+
 
 class StreamingDataset(IterableDataset):
     def __init__(self, retriever:BaseRetriever,local_dir:Optional[str] = None,  num_threads = 4, queue_size = 2000):
@@ -50,6 +52,7 @@ class StreamingDataset(IterableDataset):
             except Exception as e:
                 self.output_queue.put(e)
                 self._finished.set()
+
             finally:
                 file_path = os.path.join(self.retriever.cache_dir, os.path.basename(file_id))
                 if os.path.isdir(file_path):
@@ -90,3 +93,41 @@ class StreamingDataset(IterableDataset):
     def close(self):
         self._finished.set()
         self.executor.shutdown(wait = True)
+
+
+class CombinedDataset(IterableDataset):
+    def __init__(self, datasets:List[StreamingDataset], shuffle:Literal[None, 'ordered', 'pseudo'] = 'pseudo'):
+        super().__init__()
+        self.datasets = datasets
+        self.shuffle = shuffle
+
+    def __len__(self):
+        count = 0
+        for ds in self.datasets:
+            count += len(ds)
+        return count
+
+    def __iter__(self):
+        iterators = self.datasets
+        if self.shuffle == 'pseudo':
+            while iterators:
+                it = choice(iterators)
+                try:
+                    yield next(it)
+                except StopIteration:
+                    iterators.remove(it)
+        elif self.shuffle == 'ordered':
+            while True:
+                for ds in iterators:
+                    try:
+                        yield next(ds)
+                    except StopIteration:
+                        iterators.remove(ds)
+        elif self.shuffle is None:
+            for ds in iterators:
+                for item in ds:
+                    yield item
+        else:
+            raise ValueError(f"Unsupported shuffle mode: {self.shuffle}")
+
+

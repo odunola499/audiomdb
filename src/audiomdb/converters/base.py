@@ -26,11 +26,6 @@ from datetime import datetime
 
 
 def compute_checksum(file_path: str) -> str:
-    """
-    Compute checksum of a file using sha256
-    :param file_path:
-    :return: checksum
-    """
     h = hashlib.new('sha256')
     file_path = os.path.join(file_path, 'data.mdb')
     with open(file_path, 'rb') as fp:
@@ -40,15 +35,6 @@ def compute_checksum(file_path: str) -> str:
 
 
 def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
-    """Convert input data to a numpy array at the target sample rate.
-
-    Args:
-        data: File path, numpy array, or raw bytes.
-        sample_rate: Desired sample rate for the returned array.
-
-    Returns:
-        A float32 numpy array (mono).
-    """
     if isinstance(data, np.ndarray):
         return data
     elif isinstance(data, str):
@@ -69,7 +55,6 @@ def load_array(data: Union[str, np.ndarray, bytes], sample_rate: int = 16000):
 
 
 def process_sample(sample: dict, processor: BaseProcessor = None, **kwargs) -> dict:
-    """Decode, process, and serialize a sample ready for LMDB."""
     audio_bytes = sample.get('audio')
     if audio_bytes is None:
         raise ValueError("Sample does not contain 'audio' data.")
@@ -85,31 +70,38 @@ def process_sample(sample: dict, processor: BaseProcessor = None, **kwargs) -> d
         del audio_array
         gc.collect()
         return result
-    
-    # No processor, just convert audio to bytes
+
     sample['audio'] = sample['audio'].tobytes()
     del audio_array
     gc.collect()
     return sample
 
 
+def serialize_sample_for_metadata(sample: dict) -> dict:
+    metadata_sample = {}
+    for key, value in sample.items():
+        if key == 'audio':
+            if isinstance(value, bytes):
+                metadata_sample[key] = f"<audio:bytes:{len(value)}>"
+            elif isinstance(value, np.ndarray):
+                metadata_sample[key] = f"<audio:ndarray:shape={value.shape},dtype={value.dtype}>"
+            else:
+                metadata_sample[key] = f"<audio:{type(value).__name__}>"
+        elif isinstance(value, np.ndarray):
+            metadata_sample[key] = {
+                '_type': 'ndarray',
+                'shape': list(value.shape),
+                'dtype': str(value.dtype),
+                'data': value.tolist()
+            }
+        elif isinstance(value, (np.integer, np.floating)):
+            metadata_sample[key] = value.item()
+        else:
+            metadata_sample[key] = value
+    return metadata_sample
+
+
 class BaseConverter(ABC):
-    """
-    Convert datasets into sharded LMDB format.
-
-    Subclasses implement sample_iterator() to yield (key, sample) pairs. This base
-    handles buffering into shards, optional multiprocessing, applying processors,
-    and writing LMDB environments plus a metadata.json summary.
-
-    Memory considerations:
-    - samples_per_shard controls how many samples are buffered in memory at once.
-    - If raw audio bytes will be stored (no audio processors with keep_original=False),
-      the constructor caps samples_per_shard at 1000 to limit peak memory.
-    - map_size sets the LMDB map size per shard (bytes).
-    - num_workers sets the number of threads for writing shards.
-    - limit_iteration can limit the number of samples converted. (-1 for entire dataset). Has to be explicitly set in the subclass constructor. Check HF converter for inspiration.
-    """
-
     def __init__(
             self,
             output_dir: str,
@@ -125,7 +117,11 @@ class BaseConverter(ABC):
         self.map_size = map_size
         self.sample_rate = sample_rate
 
-        os.makedirs(output_dir, exist_ok=True)
+        try:
+            os.makedirs(output_dir, exist_ok=False)
+        except FileExistsError:
+            raise FileExistsError(
+                f"Output directory {output_dir} already exists. Please choose a different directory or remove the existing one.")
 
         self.num_workers = min(num_workers, mp.cpu_count())
         self.processor = processor
@@ -140,20 +136,11 @@ class BaseConverter(ABC):
 
     @abstractmethod
     def sample_iterator(self):
-        """
-        Yield (key, sample) pairs.
-        `sample` should be serializable (pickle, msgpack, etc.). yielded audio data must be in bytes or numpy array format.
-        Example:
-            yield "sample_00001", {"audio": audio_array, "text": "hello world"}
-        """
         pass
 
     @property
     @abstractmethod
     def converter_name(self) -> str:
-        """
-        Return a unique name for the converter.
-        """
         pass
 
     @staticmethod
@@ -209,7 +196,8 @@ class BaseConverter(ABC):
             print(f"Elapsed: {elapsed:.2f} s")
 
     @staticmethod
-    def _write_shard(shard_id: int, samples: list, output_dir, map_size, processor: BaseProcessor = None, sample_rate: int = 16000) -> tuple:
+    def _write_shard(shard_id: int, samples: list, output_dir, map_size, processor: BaseProcessor = None,
+                     sample_rate: int = 16000) -> tuple:
         shard_path = os.path.join(output_dir, f"shard_{shard_id:05d}")
         print(f"Opening shard {shard_path}")
         env = lmdb.open(shard_path, map_size=map_size)
@@ -222,7 +210,7 @@ class BaseConverter(ABC):
                 for key, sample in tqdm(samples, desc='Writing Shard'):
                     processed_sample = process_sample(sample, processor, sample_rate=sample_rate)
                     if first_sample is None:
-                        first_sample = processed_sample
+                        first_sample = processed_sample.copy()
                     shard_duration += processed_sample.get('duration', 0.0)
                     txn.put(key.encode("utf-8"), pickle.dumps(processed_sample))
 
@@ -236,11 +224,6 @@ class BaseConverter(ABC):
         return shard_path, shard_duration, first_sample
 
     def convert(self) -> None:
-        """
-        Convert the dataset to sharded LMDB format.
-        This method processes samples sequentially and writes them to shards.
-        :return:
-        """
         import time as _t
         _start = _t.time()
 
@@ -266,23 +249,18 @@ class BaseConverter(ABC):
             sample['shard_id'] = shard_id
             sample['shard_position'] = buffer_position
 
-            if test_sample is None:
-                probe = {k: v for k, v in sample.items() if k != 'audio'}
-                probe['audio'] = '<audio:bytes>'
-                test_sample = probe
-
-
             buffer_position += 1
             buffer.append((key, sample))
             total_samples += 1
 
             if len(buffer) >= self.samples_per_shard:
                 shard_path, shard_duration, first_sample = BaseConverter._write_shard(shard_id, buffer, self.output_dir,
-                                                                                      self.map_size, self.processor, self.sample_rate)
+                                                                                      self.map_size, self.processor,
+                                                                                      self.sample_rate)
                 total_duration += shard_duration
                 if test_sample is None:
-                    test_sample = first_sample
-                size = os.path.getsize(os.path.join(shard_path,'data.mdb'))
+                    test_sample = serialize_sample_for_metadata(first_sample)
+                size = os.path.getsize(os.path.join(shard_path, 'data.mdb'))
                 checksum = compute_checksum(shard_path)
 
                 shard_infos.append({
@@ -310,11 +288,12 @@ class BaseConverter(ABC):
 
         if buffer:
             shard_path, shard_duration, first_sample = BaseConverter._write_shard(shard_id, buffer, self.output_dir,
-                                                                                  self.map_size, self.processor, self.sample_rate)
+                                                                                  self.map_size, self.processor,
+                                                                                  self.sample_rate)
             total_duration += shard_duration
             if test_sample is None:
-                test_sample = first_sample
-            size = os.path.getsize(os.path.join(shard_path,'data.mdb'))
+                test_sample = serialize_sample_for_metadata(first_sample)
+            size = os.path.getsize(os.path.join(shard_path, 'data.mdb'))
             checksum = compute_checksum(shard_path)
 
             del buffer
@@ -385,12 +364,6 @@ class BaseConverter(ABC):
                 sample['shard_id'] = shard_id
                 sample['shard_position'] = buffer_position
 
-                with metadata_lock:
-                    if metadata['test_sample'] is None:
-                        probe = {k: v for k, v in sample.copy().items() if k != 'audio'}
-                        probe['audio'] = '<audio:bytes>'
-                        metadata['test_sample'] = probe
-
                 buffer_position += 1
                 buffer.append((key, sample))
 
@@ -436,8 +409,9 @@ class BaseConverter(ABC):
 
                     shard_id, samples = task
 
-                    def callback(shard_path, shard_id=shard_id):
-                        size = os.path.getsize(os.path.join(shard_path,'data.mdb'))
+                    def callback(result, shard_id=shard_id):
+                        shard_path, shard_duration, first_sample = result
+                        size = os.path.getsize(os.path.join(shard_path, 'data.mdb'))
                         checksum = compute_checksum(shard_path)
                         with metadata_lock:
                             metadata["shards"].append({
@@ -446,17 +420,15 @@ class BaseConverter(ABC):
                                 "size_bytes": size,
                                 "checksum_sha256": checksum
                             })
+                            if metadata['test_sample'] is None and first_sample is not None:
+                                metadata['test_sample'] = serialize_sample_for_metadata(first_sample)
+                            metadata['total_duration'] += shard_duration
 
                     tasks.append(
                         pool.apply_async(
                             BaseConverter._write_shard,
                             args=(shard_id, samples, self.output_dir, self.map_size, self.processor, self.sample_rate),
-                            callback=lambda res, shard_id=shard_id: (callback(res[0], shard_id),
-                                                                     metadata.__setitem__('test_sample', metadata.get(
-                                                                         'test_sample') or (res[2] if isinstance(
-                                                                         res[2].get('audio', None),
-                                                                         (bytes, bytearray)) and not metadata.get(
-                                                                         'test_sample') else res[2])))
+                            callback=callback
                         )
                     )
 
@@ -473,17 +445,9 @@ class BaseConverter(ABC):
                     continue
 
             for t in tasks:
-                res = t.get()
-                with metadata_lock:
-                    if metadata['test_sample'] is None:
-                        metadata['test_sample'] = res[2]
-                    metadata['total_duration'] += res[1]
+                t.wait()
 
         producer_thread.join()
-
-        test_sample = metadata['test_sample']
-        if 'audio' in test_sample and isinstance(test_sample['audio'], bytes):
-            metadata['test_sample']['audio'] = 'audio in bytes'
 
         info = {
             "dataset_name": getattr(self, "dataset_name", "unknown"),
@@ -521,4 +485,3 @@ class BaseConverter(ABC):
             else:
                 raise ValueError("Unsupported upload type")
             uploader.upload_dir(self.output_dir)
-
